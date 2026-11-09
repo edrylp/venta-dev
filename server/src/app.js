@@ -20,6 +20,10 @@ app.get("/api/health", (req, res) => {
   res.json({ success: true, data: { status: "ok" } });
 });
 
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
+});
+
 app.use(errorHandler); 
 
 export default app;
