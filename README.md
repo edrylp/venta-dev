@@ -30,23 +30,38 @@ Out of scope: payments, shipping, real-time chat, reviews. See the PRD.
 
 ## Repository structure
 
-    /client   React app
-    /server   Express API
-    /docs     PRD, TSD
+```text
+venta/
+├── client/
+│   └── .env                       # Frontend environment variables (gitignored)
+│   ├── .env.example               # Environment variable template
+├── docs/
+│   ├── PRD.md
+│   └── TSD.md
+├── server/
+│   ├── src/
+│   │   ├── middleware/
+│   │   │   └── errorHandler.js
+│   │   ├── app.js                 # Express app configuration; exports app
+│   │   └── server.js              # Local dev entry point; loads env variables and calls listen()
+│   ├── .env                       # Backend environment variables (gitignored)
+│   ├── .env.example               # Environment variable template
+│   └── package.json
+└── README.md
+```
 
 ## Getting started (local)
 
-Prerequisites: Node.js, a MongoDB Atlas database, an S3 bucket.
+Prerequisites: Node.js and a MongoDB Atlas database.
 
 1. Clone the repo.
 2. `cd server`, copy `.env.example` to `.env`, fill in the values.
-3. `cd client`, copy `.env.example` to `.env`, set `VITE_API_URL`.
-4. Install dependencies and start each side (commands added once the scripts exist).
+3. Install dependencies and run `npm run dev`.
 
 ## Documentation
 
-- [PRD](docs/PRD.md) · [TSD](docs/TSD.md)
-- ADRs and API docs: links added when published
+- [PRD](docs/PRD.md)
+- [TSD](docs/TSD.md)
 
 ## Roadmap
 
