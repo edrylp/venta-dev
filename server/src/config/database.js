@@ -5,6 +5,8 @@ const cached = {
   promise: null,
 };
 
+mongoose.set("sanitizeFilter", true);
+
 const connectDatabase = async () => {
   if (cached.conn) {
     return cached.conn;
