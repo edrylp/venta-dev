@@ -1,6 +1,7 @@
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
+import errorHandler from "./middleware/errorHandler";
 
 const app = express();
 
@@ -18,5 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 app.get("/api/health", (req, res) => {
   res.json({ success: true, data: { status: "ok" } });
 });
+
+app.use(errorHandler); 
 
 export default app;
