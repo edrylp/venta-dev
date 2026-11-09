@@ -16,7 +16,7 @@ const errorHandler = (err, req, res, next) => {
 
   // duplicate
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
+    const field = Object.keys(err.keyValue ?? {})[0] ?? "Value";
     message = `${field.charAt(0).toUpperCase() + field.slice(1)} already exists.`;
     statusCode = 409;
   }
@@ -31,7 +31,7 @@ const errorHandler = (err, req, res, next) => {
 
   // invalid ObjectId
   if (err.name === "CastError") {
-    message = `Invalid ID format: ${err.value}`;
+    message = "Invalid ID format";
     statusCode = 400;
   }
 
