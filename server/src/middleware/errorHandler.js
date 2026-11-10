@@ -1,6 +1,15 @@
+import { errors } from "@vinejs/vine";
+
 const errorHandler = (err, req, res, next) => {
   let statusCode = err.statusCode || 500;
   let message = err.message || "Internal Server Error";
+
+  // VineJS validation errors
+  if (err instanceof errors.E_VALIDATION_ERROR) {
+    return res
+      .status(400)
+      .json({ success: false, message: err.messages[0].message });
+  }
 
   // invalid token
   if (err.name === "JsonWebTokenError") {
