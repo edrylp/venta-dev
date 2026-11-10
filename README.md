@@ -40,6 +40,8 @@ venta/
 │   └── TSD.md
 ├── server/
 │   ├── src/
+│   │   ├── config/
+│   │   │   └── database.js        # Cached MongoDB connection
 │   │   ├── middleware/
 │   │   │   └── errorHandler.js
 │   │   ├── app.js                 # Express app configuration; exports app
