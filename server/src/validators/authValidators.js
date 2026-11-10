@@ -5,3 +5,8 @@ export const registerValidator = vine.create({
     email: vine.string().trim().email(),
     password: vine.string().minLength(8).maxLength(72),
 });
+
+export const loginValidator = vine.create({
+    email: vine.string().trim().email(),
+    password: vine.string(),
+});
