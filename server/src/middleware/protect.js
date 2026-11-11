@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import RevokedToken from "../models/RevokedToken.js";
 
 const unauthorized = (res, message) =>
   res.status(401).json({ success: false, message });
@@ -17,6 +18,17 @@ const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY, {
       algorithms: ["HS256"],
     });
+
+    if (!decoded.jti) {
+        return unauthorized(res, "Invalid or expired token. Please log in again.")
+    }
+
+    const revoked = await RevokedToken.findOne({ jti: decoded.jti })
+      .select("_id")
+      .lean();
+    if (revoked) {
+        return unauthorized(res, "This token has been revoked. Please log in again.");
+    }
 
     const user = await User.findById(decoded.id).select("+passwordChangedAt");
     if (!user) {
