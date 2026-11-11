@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 
 const generateToken = (userId) => {
   return jwt.sign(
@@ -7,7 +8,8 @@ const generateToken = (userId) => {
     },
     process.env.JWT_SECRET_KEY,
     {
-      expiresIn: process.env.JWT_EXPIRES_IN
+      expiresIn: process.env.JWT_EXPIRES_IN,
+      jwtid: randomUUID(),
     },
   );
 };
