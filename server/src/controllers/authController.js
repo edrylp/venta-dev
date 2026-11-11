@@ -40,3 +40,7 @@ const register = async (req, res, next) => {
     next(error);
   }
 };
+
+export default {
+  register
+};
