@@ -46,7 +46,7 @@ const login = async (req, res, next) => {
     const { email, password } = req.validated.body;
 
   const user = await User.findOne({ email }).select("+password");
-  
+
   if (!user || !(await user.matchPassword(password))) {
     return res.status(401).json({
       success: false,
@@ -54,7 +54,7 @@ const login = async (req, res, next) => {
     });
   }
 
-  res.status(201).json({
+  res.status(200).json({
       success: true,
       data: {
         user: {
