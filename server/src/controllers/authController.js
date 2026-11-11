@@ -6,6 +6,22 @@ const register = async (req, res, next) => {
   try {
     const { username, email, password } = req.validated.body;
 
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) {
+        return res.status(409).json({
+        success: false,
+        message: "Email already registered.",
+        });
+    }
+
+    const existingUser = await User.findOne({ username });
+    if (existingUser) {
+        return res.status(409).json({
+        success: false,
+        message: "Username has already been taken.",
+        });
+    }
+
     const user = await User.create({ username, email, password });
 
     res.status(201).json({
