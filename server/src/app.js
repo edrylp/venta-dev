@@ -2,6 +2,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import errorHandler from "./middleware/errorHandler.js";
+import authRoutes from "./routes/authRoutes.js";
 
 const app = express();
 
@@ -19,6 +20,9 @@ app.use(express.urlencoded({ extended: true }));
 app.get("/api/health", (req, res) => {
   res.json({ success: true, data: { status: "ok" } });
 });
+
+// Routes
+app.use("/api/auth", authRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "Route not found" });
