@@ -4,6 +4,7 @@ import cors from "cors";
 import errorHandler from "./middleware/errorHandler.js";
 import authRoutes from "./routes/authRoutes.js";
 import protect from "./middleware/protect.js";
+import authorize from "./middleware/authorize.js";
 
 const app = express();
 
@@ -24,6 +25,13 @@ app.get("/api/health", (req, res) => {
 
 // TEMPORARY!
 app.get("/api/health/protected", protect, (req, res) => {
+  res.status(200).json({
+    success: true,
+    data: { _id: req.user._id, role: req.user.role }
+  });
+});
+
+app.get("/api/health/admin", protect, authorize("admin"), (req, res) => {
   res.status(200).json({
     success: true,
     data: { _id: req.user._id, role: req.user.role }
