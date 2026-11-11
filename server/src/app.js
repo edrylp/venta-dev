@@ -3,6 +3,7 @@ import helmet from "helmet";
 import cors from "cors";
 import errorHandler from "./middleware/errorHandler.js";
 import authRoutes from "./routes/authRoutes.js";
+import protect from "./middleware/protect.js";
 
 const app = express();
 
@@ -19,6 +20,14 @@ app.use(express.urlencoded({ extended: true }));
 
 app.get("/api/health", (req, res) => {
   res.json({ success: true, data: { status: "ok" } });
+});
+
+// TEMPORARY!
+app.get("/api/health/protected", protect, (req, res) => {
+  res.status(200).json({
+    success: true,
+    data: { _id: req.user._id, role: req.user.role }
+  });
 });
 
 // Routes
