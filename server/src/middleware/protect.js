@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import User from "../models/User.js";
 
 const unauthorized = (res, message) =>
   res.status(401).json({ success: false, message });
@@ -17,7 +18,17 @@ const protect = async (req, res, next) => {
       algorithms: ["HS256"],
     });
 
+    const user = await User.findById(decoded.id).select("+passwordChangedAt");
+    if (!user) {
+        return unauthorized(res, "User belonging to this token no longer exists.");
+    }
+
+    if (user.changedPasswordAfter(decoded.iat)) {
+        return unauthorized(res, "Password recently changed. Please log in again.");
+    }
+
     req.auth = decoded;
+    req.user = user;
     next();
   } catch (error) {
     return unauthorized(res, "Invalid or expired token. Please login again.");
