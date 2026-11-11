@@ -41,6 +41,38 @@ const register = async (req, res, next) => {
   }
 };
 
+const login = async (req, res, next) => {
+  try {
+    const { email, password } = req.validated.body;
+
+  const user = await User.findOne({ email }).select("+password");
+  
+  if (!user || !(await user.matchPassword(password))) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid username or password."
+    });
+  }
+
+  res.status(201).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+        },
+        token: generateToken(user._id),
+      }
+    });
+
+  } catch (error) {
+    next(error);
+  }
+;}
+
 export default {
-  register
+  register,
+  login,
 };
