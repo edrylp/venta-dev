@@ -42,10 +42,19 @@ venta/
 │   ├── src/
 │   │   ├── config/
 │   │   │   └── database.js        # Cached MongoDB connection
+│   │   │   └── vine.js            # VineJS custom error messages
 │   │   ├── middleware/
-│   │   │   └── errorHandler.js
+│   │   │   └── errorHandler.js    # Centralized error handler
+│   │   │   └── validate.js        # VineJS validator
+│   │   ├── models/
+│   │   │   └── RevokedToken.js    # Revoked JWT IDs with a TTL index
+│   │   │   └── User.js            # User schema and password hashing
+│   │   ├── validators/
+│   │   │   └── authValidators.js  # VineJS schemas for the auth endpoints
 │   │   ├── app.js                 # Express app configuration; exports app
-│   │   └── server.js              # Local dev entry point; loads env variables and calls listen()
+│   │   └── server.js              # Local dev entry point
+│   ├── tests/
+│   │   └── validation.test.js
 │   ├── .env                       # Backend environment variables (gitignored)
 │   ├── .env.example               # Environment variable template
 │   └── package.json
