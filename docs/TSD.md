@@ -2,9 +2,9 @@
 
 > **Venta** is a C2C marketplace for used PCs and PC components.
 
-> **Author:** Edryl Palinis · **Version:** 1.0
+> **Author:** Edryl Palinis · **Version:** 1.1
 
-> **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
+> **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
 ---
 
@@ -17,6 +17,13 @@
 5. [Cloud Infrastructure & Security Considerations](#5-cloud-infrastructure--security-considerations)
 6. [Development & Deployment Plan (SDLC Workflow)](#6-development--deployment-plan-sdlc-workflow)
 7. [Appendix: Future Improvements](#7-appendix-future-improvements)
+
+### Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.1 | 2026-11-12 | Synced with Phase 1: VineJS validation, auth response shape, health routes, `/api` prefix, tests moved to Phase 1, env var clarifications, `protect` vs `errorHandler`, project structure. |
+| 1.0 | 2026-11-08 | Initial final version. |
 
 ---
 
@@ -54,7 +61,7 @@ The MVP is intentionally small. Each goal exists to demonstrate a specific skill
 | # | Goal | Skill Demonstrated |
 |---|------|--------------------|
 | 1 | Register, log in, and stay logged in with JWT | Authentication & authorization |
-| 2 | Create, read, update, delete listings with filters | REST API design, MongoDB querying |
+| 2 | Create, read, update, delete listings with filters | REST API design, MongoDB querying, request validation |
 | 3 | Upload 1 to 10 photos per listing directly to S3 | Cloud storage, secure credential handling |
 | 4 | Admin approval workflow for listings | Role-based access control, state machines |
 | 5 | Basic user-to-user messaging about a listing | Data modeling with references |
@@ -235,6 +242,8 @@ export default mongoose.models.User || mongoose.model("User", userSchema);
 > **Why `mongoose.models.User ||`?** Lambda can reuse a "warm" container, and Mongoose throws an error if you register the same model twice. This guard prevents that.
 
 > **Privacy:** The `username` is the only identity shown to other users. The email is used to log in and is never returned in public responses (listings, conversations).
+
+> **Password length:** Passwords must be 8 to 72 characters. The upper bound is enforced in the validation layer (see 5.4), not in this schema. bcrypt only uses the first 72 bytes of its input, so a longer password would be silently truncated. The limit is counted in characters, so a password with multi-byte characters can still exceed 72 bytes. That edge case is accepted for the MVP.
 
 ### 3.2 `Listing` Model
 
@@ -497,7 +506,9 @@ export default connectDatabase;
 
 ## 4. API Endpoints & Routes (RESTful)
 
-**Base URL:** `https://<api-id>.execute-api.<region>.amazonaws.com/<stage>/api`
+**Base URL:** `https://<api-id>.execute-api.<region>.amazonaws.com/api` (local: `http://localhost:<PORT>/api`)
+
+- **Path prefix:** Express mounts every router under `/api` itself (`app.use("/api/auth", authRoutes)`). API Gateway uses the `$default` stage, so no stage name appears in the path and no path rewriting is needed. The same route table works locally, on Lambda, and in Postman.
 
 **Conventions**
 
@@ -515,6 +526,28 @@ export default connectDatabase;
 | `POST` | `/auth/login` | Public | Log in with `email` + `password`. Returns user + JWT. |
 | `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. |
 | `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its `jti` and expiry in `RevokedToken`. Safe to call twice. |
+
+**Response shape for `POST /auth/register` (`201`) and `POST /auth/login` (`200`)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "_id": "…",
+      "username": "ventauser",
+      "email": "ventauser@example.com",
+      "role": "user"
+    },
+    "token": "<JWT>"
+  }
+}
+```
+
+- `user` contains exactly `_id`, `username`, `email`, and `role`. The password hash is never returned. 
+- `role` is included so the frontend can show or hide admin UI. It is only a UI hint: the server reads the role from the database on every protected request (see 5.2), so changing it client-side grants nothing.
+- The user's own `email` is returned to that user only. Email is never returned in public responses (see the privacy note in 3.1).
+- A failed login returns `401` with `{ "success": false, "message": "Invalid email or password" }`, the same message for an unknown email and a wrong password (see 5.3).
 
 ### 4.2 Listings
 
@@ -582,21 +615,27 @@ All routes require a logged-in user.
 ### 4.6 Suggested Project Structure
 
 ```text
-server/
-├── src/
-│   ├── app.js              # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
-│   ├── server.js           # Local dev entry: `import "dotenv/config"` first, then connects DB, calls listen()
-│   ├── handler.js          # Lambda entrypoint
-│   ├── config/
-│   │   └── database.js     # Cached Mongoose connection
-│   ├── models/             # User, Listing, Message, Conversation, RevokedToken
-│   ├── routes/             # authRoutes, listingRoutes, adminRoutes, conversationRoutes, messageRoutes, uploadRoutes
-│   ├── controllers/
-│   ├── middleware/         # protect.js, authorize.js, errorHandler.js
-│   └── utils/              # s3.js, generateToken.js
-├── .env                    # Local only (gitignored); Lambda uses function environment variables
-├── serverless.yml          # (or template.yaml if using AWS SAM)
-└── package.json
+venta/
+├── client/                 # React (Vite) frontend, deployed to Vercel
+├── docs/                   # PRD, TSD, API docs
+└── server/
+    ├── src/
+    │   ├── app.js          # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
+    │   ├── server.js       # Local dev entry: connects DB, calls listen()
+    │   ├── handler.js      # Lambda entrypoint
+    │   ├── config/
+    │   │   ├── database.js # Cached Mongoose connection
+    │   │   └── vine.js     # VineJS setup: shared error-messages provider
+    │   ├── models/         # User, Listing, Message, Conversation, RevokedToken
+    │   ├── routes/         # authRoutes, listingRoutes, adminRoutes, conversationRoutes, messageRoutes, uploadRoutes
+    │   ├── controllers/    # One file per resource 
+    │   ├── validators/     # VineJS schemas
+    │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
+    │   └── utils/          # s3.js, generateToken.js
+    ├── tests/              # Vitest + Supertest
+    ├── .env                # Local only (gitignored); Lambda uses function environment variables
+    ├── .env.example        # Template listing every variable (no secrets), committed
+    └── package.json
 ```
 
 ### 4.7 Lambda Entry Point
@@ -615,6 +654,16 @@ export const handler = async (event, context) => {
   return expressHandler(event, context);
 };
 ```
+
+### 4.8 Health and Temporary Verification Routes
+
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| `GET` | `/health` | Public | Confirms the server is running. Permanent. |
+| `GET` | `/health/protected` | User | **Temporary (Phase 1).** Returns the authenticated user's `_id` and `role`. Used to verify `protect`. Removed in Phase 2. |
+| `GET` | `/health/admin` | Admin | **Temporary (Phase 1).** Same response, behind `protect` and `authorize('admin')`. Used to verify `authorize`. Removed in Phase 2. |
+
+These exist so middleware can be tested before any real protected route exists. Once the listing and admin routes exist (Phase 2), the two temporary routes are deleted, and real routes cover `protect` and `authorize`. 
 
 > **Why no `dbReady` here?** `connectDatabase()` already caches the connection and clears a failed attempt (see 3.6). A second cache in the handler would remember a failed first connect for the life of the warm container.
 
@@ -732,31 +781,39 @@ const images = uploads.map((u) => u.key);
 
 | Practice | Details |
 |----------|---------|
-| **Signing** | Sign with a long random secret (`JWT_SECRET_KEY`, 32+ chars) stored as an environment variable. |
+| **Signing** | Sign with a long random secret (`JWT_SECRET_KEY`, 32+ chars) stored as an environment variable. `jwt.verify` pins the algorithm to HS256, so a token that declares a different algorithm is rejected. |
 | **Payload** | Include only `id` (user ID) and `jti` (a unique token ID used for revocation). The role is not in the token: `protect` loads it from the database, so a role change takes effect immediately. Never put passwords or sensitive data in a JWT (it's encoded, not encrypted). |
 | **Expiry** | Short-lived tokens (e.g. `1h`–`7d` depending on how much complexity you want). |
 | **Transport** | HTTPS only. Send in the `Authorization: Bearer` header. |
-| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. Only JWT problems (invalid, expired, revoked) return `401`; any other error, such as a database failure, goes to the central `errorHandler`, so it is logged and never looks like a bad token. An `authorize('admin')` middleware then checks `req.user.role` on admin routes. |
+| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. `protect` handles authentication failures itself: a missing, invalid, expired, or revoked token, or one issued before the last password change, gets a `401` in the standard `{ success: false, message }` shape, sent directly from `protect`. Any other error, such as a database failure, is passed to the central `errorHandler` with `next(err)`, so it is logged and never looks like a bad token. An `authorize('admin')` middleware then checks `req.user.role` on admin routes. |
 | **Revocation (logout)** | `POST /auth/logout` stores the token's `jti` and expiry in `RevokedToken`. A TTL index removes each entry once the token would have expired anyway. Trade-off: every protected request makes one extra database read, in exchange for a real server-side logout. Changing the password invalidates older tokens separately, through `passwordChangedAt`. |
 | **Authorization ≠ Authentication** | Being logged in isn't enough. Always check ownership (e.g. `listing.userId.equals(req.user._id)`) before editing or deleting. |
 | **Role from DB, not client** | Never accept `role` from the register request body. New users are always `user`. |
 
 > **Portfolio note:** For the MVP, storing the JWT in `localStorage` is acceptable and simple. Be ready to discuss the trade-off: it's exposed to XSS, whereas `httpOnly` cookies are exposed to CSRF instead. Mentioning this shows security awareness. The Zustand auth store uses the `persist` middleware, which saves the token and user in `localStorage`, so this same trade-off applies.
 
+> **Who formats which error?** Two layers, one rule: authentication errors (anything wrong with the token) are formatted by `protect`; everything else is formatted by `errorHandler`. Keeping JWT handling inside `protect` means `errorHandler` doesn't need to know about JWT internals, and a server fault can never be reported to the client as a `401` (which would also trigger the frontend's logout-on-`401` interceptor).
+
 ### 5.3 Passwords (bcrypt)
 
 - Hash with `bcrypt` using **12 salt rounds** in a Mongoose `pre('save')` hook that only runs when the password changed; never store or log plain-text passwords. `select: false` keeps the hash out of normal queries.
+- Enforce a **72-character maximum** (with the 8-character minimum) in the VineJS validators for register and change password. bcrypt truncates input beyond 72 bytes, so without a cap two different long passwords could hash identically. The limit is in characters, so multi-byte passwords can still exceed 72 bytes.
 - Compare with `user.matchPassword()` (which uses `bcrypt.compare()`) on login.
 - Return the same generic error ("Invalid email or password") for unknown email and wrong password, so attackers can't discover which emails are registered. Registration does tell the user when an email or username is already taken. That is an accepted trade-off, because the user needs to know.
 - **Changing a password** requires the current password (a wrong one returns `400`, not `401`). It sets `passwordChangedAt`, which invalidates every token issued before it, and the endpoint returns a fresh token so the current session continues.
 
 ### 5.4 Input Validation & Sanitization
 
-- Validate **every** request body, query string, and param. Consider using a schema validator such as **Zod** or **express-validator** (length limits, allowed enum values, positive numbers, valid ObjectIds).
+- - Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`): validate that inputs are strings. `sanitizeFilter` is also enabled globally (see 3.6).
 - Validate `images[]` with `ownsKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
+
+
+**The `validate` middleware.** `middleware/validate.js` is a small runner that takes a compiled VineJS schema and the request source to check (`body`, `query`, or `params`). On success it stores the validated output on `req.validated[source]` and calls `next()`. On failure it passes the error on so the central `errorHandler` returns a `400` in the standard `{ success: false, message }` shape. Controllers read from `req.validated.body`, never from `req.body`.
+
+Why this helps: VineJS output contains only the fields the schema declares, so unknown fields such as `role` or `status` are dropped before the controller sees them. That backs up the whitelisting rule above. VineJS string types also reject non-string values, which blocks the `{ "$gt": "" }` style of NoSQL injection. Normalization such as lowercasing usernames happens in the schema, not the controller.
 
 ### 5.5 CORS Between Vercel and API Gateway
 
@@ -786,7 +843,7 @@ app.use(
 | **Rate limiting** | Use API Gateway throttling (burst/rate limits) to protect against abuse, especially `/auth/login`. |
 | **Secrets** | Never commit `.env`. Use Lambda environment variables (or Secrets Manager as an upgrade). |
 | **MongoDB Atlas access** | Use a dedicated DB user with least privilege. Lambda outside a VPC has changing IPs, so the MVP will likely need `0.0.0.0/0` in the Atlas IP allow-list. Compensate with a strong password, TLS, and a limited-privilege user. Note this trade-off in your docs. Private networking (VPC peering/PrivateLink) is the production-grade fix. |
-| **Error handling** | A central `errorHandler` returns `{ success: false, message }`. It maps JWT errors, duplicate keys, validation errors, and invalid IDs to clean 4xx responses. In production, unexpected 500s return a generic message to the client but are **always logged** to CloudWatch. It never leaks stack traces or DB errors. It relies on `NODE_ENV=production` being set on Lambda. |
+| **Error handling** | A central `errorHandler` returns `{ success: false, message }`. It maps duplicate keys (`11000`), validation errors (Mongoose and VineJS), and invalid IDs to clean 4xx responses. JWT errors are not handled here: `protect` responds to them itself (see 5.2). In production, unexpected 500s return a generic message to the client but are **always logged** to CloudWatch. It never leaks stack traces or DB errors. It relies on `NODE_ENV=production` being set on Lambda. |
 | **Logging** | `console.log` and `console.error` in Lambda go to **CloudWatch Logs** automatically. Log every 500 error. Don't log passwords or tokens. |
 | **Dependencies** | Run `npm audit` periodically. |
 
@@ -802,7 +859,7 @@ app.use(
 | **2. Requirements** | User roles, categories, and features (Sections 1 & 4). |
 | **3. Design** | Architecture diagrams, data models, API contract (Sections 2–4). |
 | **4. Implementation** | Build in phases below, using Git feature branches. |
-| **5. Testing** | Manual testing with Postman, plus a few automated tests (Vitest + Supertest). |
+| **5. Testing** | Manual testing with Postman, plus automated tests (Vitest + Supertest). The test setup is created in Phase 1, and tests are added as each phase ships. |
 | **6. Deployment** | Vercel (frontend) + AWS Lambda/API Gateway (backend). |
 | **7. Maintenance** | Monitor CloudWatch logs, fix bugs, and iterate on the backlog. |
 | **Process** | Kanban on GitHub Projects: Backlog → Ready → In progress → In review → Done, with a WIP limit of 1–2 cards. |
@@ -828,19 +885,19 @@ app.use(
 - [ ] Create the `RevokedToken` model (TTL index on `expiresAt`) and include a `jti` in every token in `generateToken`.
 - [ ] Build `POST /auth/register`, `POST /auth/login`, `PATCH /auth/password`, `POST /auth/logout`.
 - [ ] Add `protect` (verifies the JWT, rejects revoked tokens, loads the user, rejects tokens issued before a password change) and `authorize('admin')` (checks the role) middleware.
-- [ ] Add a temporary protected route, `GET /api/health/protected`, that returns the authenticated user's `_id` and `role`. Remove it in Phase 2.
-- [ ] Add request validation.
+- [ ] Add temporary protected routes: `GET /api/health/protected` (behind `protect`) and `GET /api/health/admin` (behind `protect` and `authorize('admin')`). Both return the authenticated user's `_id` and `role`. Remove both in Phase 2.
+- [ ] Add VineJS request validation (`validators/` + `validate` middleware).
 - [ ] Seed one admin user via a script (it imports `dotenv/config` itself).
 - [ ] Test all endpoints in Postman.
 
-**Done when:** you can register, log in, call the temporary protected route with a token, and confirm that after changing the password the old token is rejected, and that after logging out the same token is rejected.
+**Done when:** you can register, log in, call the temporary protected routes with a token, and confirm that after changing the password the old token is rejected, and that after logging out the same token is rejected. A normal user gets `403` on `/health/admin` and an admin gets `200`. The automated tests pass.
 
 #### Phase 2 (v0.4) — Listings CRUD, S3 & Messaging
 
 - [ ] Create the `Listing` model with indexes.
 - [ ] Build listing routes: create, list (filters + pagination), get one, update, delete, and `GET /listings/my-listings`.
 - [ ] Test keyword search (`q`) with `sanitizeFilter` on. If `$text` errors or is stripped, wrap the search term with `mongoose.trusted()`.
-- [ ] Remove the temporary `GET /api/health/protected` route from Phase 1.
+- [ ] Remove the temporary `GET /api/health/protected` and `GET /api/health/admin` routes from Phase 1, now that real routes exercise `protect` and `authorize`.
 - [ ] Enforce ownership checks and the status lifecycle (Section 2.3).
 - [ ] Create an S3 bucket (block most public access; configure CORS and `listings/*` read policy). Give the Lambda role `s3:PutObject` and `s3:DeleteObject` on `listings/*`.
 - [ ] Create `POST /uploads/presign` and test a real upload using Postman.
@@ -887,6 +944,7 @@ app.use(
 - [ ] Add screenshots/GIF demo, architecture diagram, and live link to the README.
 - [ ] Seed realistic demo data (listings across categories) and provide demo credentials.
 - [ ] Write a short "What I learned / trade-offs" section in the README.
+- [ ] Extend the test suite from Phase 1 with listing permissions and conversation permissions
 
 ### 6.3 Deployment Checklist
 
@@ -895,6 +953,7 @@ app.use(
 | Variable | Where | Example / Notes |
 |----------|-------|-----------------|
 | `NODE_ENV` | Lambda | `production` (the error handler hides internal error messages only when this is set) |
+| `PORT` | Local `.env` only | `5000`. Port for the local dev server (`server.js`). Lambda doesn't use it. |
 | `MONGODB_URI` | Lambda | `mongodb+srv://<user>:<pass>@cluster.mongodb.net/venta` |
 | `JWT_SECRET_KEY` | Lambda | Long random string (generate with `openssl rand -hex 32`) |
 | `JWT_EXPIRES_IN` | Lambda | `1d` |
@@ -902,7 +961,7 @@ app.use(
 | `S3_PUBLIC_BASE_URL` | Lambda | Public base URL used to build image URLs from keys, e.g. `https://venta-uploads.s3.<region>.amazonaws.com` |
 | `AWS_REGION` | Lambda | Set by AWS automatically in Lambda (don't set `AWS_ACCESS_KEY_ID`; use the IAM role) |
 | `FRONTEND_URL` | Lambda | `https://ventaph.vercel.app` (used for CORS) |
-| `VITE_API_URL` | Vercel | `https://<api-id>.execute-api.<region>.amazonaws.com/<stage>/api` |
+| `VITE_API_URL` | Vercel | `https://<api-id>.execute-api.<region>.amazonaws.com/api` |
 
 #### MongoDB Atlas
 
