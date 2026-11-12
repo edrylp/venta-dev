@@ -113,8 +113,27 @@ const changePassword = async (req, res, next) => {
   } 
 };
 
+const logout = async (req, res, next) => {
+  try {
+    const { jti, exp } = req.auth ?? {};
+
+    await RevokedToken.create({
+      jti,
+      expiresAt: new Date(exp * 1000),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   register,
   login,
   changePassword,
+  logout,
 };
