@@ -2,7 +2,7 @@
 
 > **Venta** is a C2C marketplace for used PCs and PC components.
 
-> **Author:** Edryl Palinis · **Version:** 1.0
+> **Author:** Edryl Palinis · **Version:** 1.1
 
 > **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
@@ -17,6 +17,13 @@
 5. [Cloud Infrastructure & Security Considerations](#5-cloud-infrastructure--security-considerations)
 6. [Development & Deployment Plan (SDLC Workflow)](#6-development--deployment-plan-sdlc-workflow)
 7. [Appendix: Future Improvements](#7-appendix-future-improvements)
+
+### Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.1 | 2026-11-12 | Synced with Phase 1: VineJS validation, auth response shape, health routes, `/api` prefix, tests moved to Phase 1, env var clarifications, `protect` vs `errorHandler`, project structure. |
+| 1.0 | 2026-11-08 | Initial final version. |
 
 ---
 
