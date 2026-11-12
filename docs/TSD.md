@@ -844,7 +844,7 @@ app.use(
 | **2. Requirements** | User roles, categories, and features (Sections 1 & 4). |
 | **3. Design** | Architecture diagrams, data models, API contract (Sections 2–4). |
 | **4. Implementation** | Build in phases below, using Git feature branches. |
-| **5. Testing** | Manual testing with Postman, plus a few automated tests (Vitest + Supertest). |
+| **5. Testing** | Manual testing with Postman, plus automated tests (Vitest + Supertest). The test setup is created in Phase 1, and tests are added as each phase ships. |
 | **6. Deployment** | Vercel (frontend) + AWS Lambda/API Gateway (backend). |
 | **7. Maintenance** | Monitor CloudWatch logs, fix bugs, and iterate on the backlog. |
 | **Process** | Kanban on GitHub Projects: Backlog → Ready → In progress → In review → Done, with a WIP limit of 1–2 cards. |
@@ -870,19 +870,19 @@ app.use(
 - [ ] Create the `RevokedToken` model (TTL index on `expiresAt`) and include a `jti` in every token in `generateToken`.
 - [ ] Build `POST /auth/register`, `POST /auth/login`, `PATCH /auth/password`, `POST /auth/logout`.
 - [ ] Add `protect` (verifies the JWT, rejects revoked tokens, loads the user, rejects tokens issued before a password change) and `authorize('admin')` (checks the role) middleware.
-- [ ] Add a temporary protected route, `GET /api/health/protected`, that returns the authenticated user's `_id` and `role`. Remove it in Phase 2.
-- [ ] Add request validation.
+- [ ] Add temporary protected routes: `GET /api/health/protected` (behind `protect`) and `GET /api/health/admin` (behind `protect` and `authorize('admin')`). Both return the authenticated user's `_id` and `role`. Remove both in Phase 2.
+- [ ] Add VineJS request validation (`validators/` + `validate` middleware).
 - [ ] Seed one admin user via a script (it imports `dotenv/config` itself).
 - [ ] Test all endpoints in Postman.
 
-**Done when:** you can register, log in, call the temporary protected route with a token, and confirm that after changing the password the old token is rejected, and that after logging out the same token is rejected.
+**Done when:** you can register, log in, call the temporary protected routes with a token, and confirm that after changing the password the old token is rejected, and that after logging out the same token is rejected. A normal user gets `403` on `/health/admin` and an admin gets `200`. The automated tests pass.
 
 #### Phase 2 (v0.4) — Listings CRUD, S3 & Messaging
 
 - [ ] Create the `Listing` model with indexes.
 - [ ] Build listing routes: create, list (filters + pagination), get one, update, delete, and `GET /listings/my-listings`.
 - [ ] Test keyword search (`q`) with `sanitizeFilter` on. If `$text` errors or is stripped, wrap the search term with `mongoose.trusted()`.
-- [ ] Remove the temporary `GET /api/health/protected` route from Phase 1.
+- [ ] Remove the temporary `GET /api/health/protected` and `GET /api/health/admin` routes from Phase 1, now that real routes exercise `protect` and `authorize`.
 - [ ] Enforce ownership checks and the status lifecycle (Section 2.3).
 - [ ] Create an S3 bucket (block most public access; configure CORS and `listings/*` read policy). Give the Lambda role `s3:PutObject` and `s3:DeleteObject` on `listings/*`.
 - [ ] Create `POST /uploads/presign` and test a real upload using Postman.
@@ -929,6 +929,7 @@ app.use(
 - [ ] Add screenshots/GIF demo, architecture diagram, and live link to the README.
 - [ ] Seed realistic demo data (listings across categories) and provide demo credentials.
 - [ ] Write a short "What I learned / trade-offs" section in the README.
+- [ ] Extend the test suite from Phase 1 with listing permissions and conversation permissions
 
 ### 6.3 Deployment Checklist
 
@@ -937,6 +938,7 @@ app.use(
 | Variable | Where | Example / Notes |
 |----------|-------|-----------------|
 | `NODE_ENV` | Lambda | `production` (the error handler hides internal error messages only when this is set) |
+| `PORT` | Local `.env` only | `5000`. Port for the local dev server (`server.js`). Lambda doesn't use it. |
 | `MONGODB_URI` | Lambda | `mongodb+srv://<user>:<pass>@cluster.mongodb.net/venta` |
 | `JWT_SECRET_KEY` | Lambda | Long random string (generate with `openssl rand -hex 32`) |
 | `JWT_EXPIRES_IN` | Lambda | `1d` |
