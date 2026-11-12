@@ -72,7 +72,49 @@ const login = async (req, res, next) => {
   }
 ;}
 
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.validated.body;
+
+    const user = await User.findById(req.user._id).select("+password");
+
+    if (!(await user.matchPassword(currentPassword))) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password is incorrect"
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password cannot be the same as the current password"
+      });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+        },
+        token: generateToken(user._id),
+      }
+    });
+
+  } catch (error) {
+    next(error);
+  } 
+};
+
 export default {
   register,
   login,
+  changePassword,
 };
