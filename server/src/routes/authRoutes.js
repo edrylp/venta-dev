@@ -15,4 +15,7 @@ router.post("/login", validate(loginValidator), authController.login);
 // Change Password
 router.patch("/password", protect, validate(changePasswordValidator), authController.changePassword);
 
+// Logout
+router.post("/logout", protect, authController.logout);
+
 export default router;
