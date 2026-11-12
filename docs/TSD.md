@@ -4,7 +4,7 @@
 
 > **Author:** Edryl Palinis · **Version:** 1.0
 
-> **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
+> **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
 ---
 
@@ -54,7 +54,7 @@ The MVP is intentionally small. Each goal exists to demonstrate a specific skill
 | # | Goal | Skill Demonstrated |
 |---|------|--------------------|
 | 1 | Register, log in, and stay logged in with JWT | Authentication & authorization |
-| 2 | Create, read, update, delete listings with filters | REST API design, MongoDB querying |
+| 2 | Create, read, update, delete listings with filters | REST API design, MongoDB querying, request validation |
 | 3 | Upload 1 to 10 photos per listing directly to S3 | Cloud storage, secure credential handling |
 | 4 | Admin approval workflow for listings | Role-based access control, state machines |
 | 5 | Basic user-to-user messaging about a listing | Data modeling with references |
@@ -235,6 +235,8 @@ export default mongoose.models.User || mongoose.model("User", userSchema);
 > **Why `mongoose.models.User ||`?** Lambda can reuse a "warm" container, and Mongoose throws an error if you register the same model twice. This guard prevents that.
 
 > **Privacy:** The `username` is the only identity shown to other users. The email is used to log in and is never returned in public responses (listings, conversations).
+
+> **Password length:** Passwords must be 8 to 72 characters. The upper bound is enforced in the validation layer (see 5.4), not in this schema. bcrypt only uses the first 72 bytes of its input, so a longer password would be silently truncated. The limit is counted in characters, so a password with multi-byte characters can still exceed 72 bytes. That edge case is accepted for the MVP.
 
 ### 3.2 `Listing` Model
 
@@ -746,17 +748,23 @@ const images = uploads.map((u) => u.key);
 ### 5.3 Passwords (bcrypt)
 
 - Hash with `bcrypt` using **12 salt rounds** in a Mongoose `pre('save')` hook that only runs when the password changed; never store or log plain-text passwords. `select: false` keeps the hash out of normal queries.
+- Enforce a **72-character maximum** (with the 8-character minimum) in the VineJS validators for register and change password. bcrypt truncates input beyond 72 bytes, so without a cap two different long passwords could hash identically. The limit is in characters, so multi-byte passwords can still exceed 72 bytes.
 - Compare with `user.matchPassword()` (which uses `bcrypt.compare()`) on login.
 - Return the same generic error ("Invalid email or password") for unknown email and wrong password, so attackers can't discover which emails are registered. Registration does tell the user when an email or username is already taken. That is an accepted trade-off, because the user needs to know.
 - **Changing a password** requires the current password (a wrong one returns `400`, not `401`). It sets `passwordChangedAt`, which invalidates every token issued before it, and the endpoint returns a fresh token so the current session continues.
 
 ### 5.4 Input Validation & Sanitization
 
-- Validate **every** request body, query string, and param. Consider using a schema validator such as **Zod** or **express-validator** (length limits, allowed enum values, positive numbers, valid ObjectIds).
+- - Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`): validate that inputs are strings. `sanitizeFilter` is also enabled globally (see 3.6).
 - Validate `images[]` with `ownsKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
+
+
+**The `validate` middleware.** `middleware/validate.js` is a small runner that takes a compiled VineJS schema and the request source to check (`body`, `query`, or `params`). On success it stores the validated output on `req.validated[source]` and calls `next()`. On failure it passes the error on so the central `errorHandler` returns a `400` in the standard `{ success: false, message }` shape. Controllers read from `req.validated.body`, never from `req.body`.
+
+Why this helps: VineJS output contains only the fields the schema declares, so unknown fields such as `role` or `status` are dropped before the controller sees them. That backs up the whitelisting rule above. VineJS string types also reject non-string values, which blocks the `{ "$gt": "" }` style of NoSQL injection. Normalization such as lowercasing usernames happens in the schema, not the controller.
 
 ### 5.5 CORS Between Vercel and API Gateway
 
