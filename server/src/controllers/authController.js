@@ -78,6 +78,20 @@ const changePassword = async (req, res, next) => {
 
     const user = await User.findById(req.user._id).select("+password");
 
+    if (!(await user.matchPassword(currentPassword))) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password is incorrect"
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password cannot be the same as the current password"
+      });
+    }
+
     user.password = newPassword;
     await user.save();
 
