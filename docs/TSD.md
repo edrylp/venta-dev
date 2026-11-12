@@ -608,21 +608,27 @@ All routes require a logged-in user.
 ### 4.6 Suggested Project Structure
 
 ```text
-server/
-├── src/
-│   ├── app.js              # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
-│   ├── server.js           # Local dev entry: `import "dotenv/config"` first, then connects DB, calls listen()
-│   ├── handler.js          # Lambda entrypoint
-│   ├── config/
-│   │   └── database.js     # Cached Mongoose connection
-│   ├── models/             # User, Listing, Message, Conversation, RevokedToken
-│   ├── routes/             # authRoutes, listingRoutes, adminRoutes, conversationRoutes, messageRoutes, uploadRoutes
-│   ├── controllers/
-│   ├── middleware/         # protect.js, authorize.js, errorHandler.js
-│   └── utils/              # s3.js, generateToken.js
-├── .env                    # Local only (gitignored); Lambda uses function environment variables
-├── serverless.yml          # (or template.yaml if using AWS SAM)
-└── package.json
+venta/
+├── client/                 # React (Vite) frontend, deployed to Vercel
+├── docs/                   # PRD, TSD, API docs
+└── server/
+    ├── src/
+    │   ├── app.js          # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
+    │   ├── server.js       # Local dev entry: connects DB, calls listen()
+    │   ├── handler.js      # Lambda entrypoint
+    │   ├── config/
+    │   │   ├── database.js # Cached Mongoose connection
+    │   │   └── vine.js     # VineJS setup: shared error-messages provider
+    │   ├── models/         # User, Listing, Message, Conversation, RevokedToken
+    │   ├── routes/         # authRoutes, listingRoutes, adminRoutes, conversationRoutes, messageRoutes, uploadRoutes
+    │   ├── controllers/    # One file per resource 
+    │   ├── validators/     # VineJS schemas
+    │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
+    │   └── utils/          # s3.js, generateToken.js
+    ├── tests/              # Vitest + Supertest
+    ├── .env                # Local only (gitignored); Lambda uses function environment variables
+    ├── .env.example        # Template listing every variable (no secrets), committed
+    └── package.json
 ```
 
 ### 4.7 Lambda Entry Point
