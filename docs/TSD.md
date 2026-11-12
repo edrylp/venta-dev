@@ -768,16 +768,18 @@ const images = uploads.map((u) => u.key);
 
 | Practice | Details |
 |----------|---------|
-| **Signing** | Sign with a long random secret (`JWT_SECRET_KEY`, 32+ chars) stored as an environment variable. |
+| **Signing** | Sign with a long random secret (`JWT_SECRET_KEY`, 32+ chars) stored as an environment variable. `jwt.verify` pins the algorithm to HS256, so a token that declares a different algorithm is rejected. |
 | **Payload** | Include only `id` (user ID) and `jti` (a unique token ID used for revocation). The role is not in the token: `protect` loads it from the database, so a role change takes effect immediately. Never put passwords or sensitive data in a JWT (it's encoded, not encrypted). |
 | **Expiry** | Short-lived tokens (e.g. `1h`–`7d` depending on how much complexity you want). |
 | **Transport** | HTTPS only. Send in the `Authorization: Bearer` header. |
-| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. Only JWT problems (invalid, expired, revoked) return `401`; any other error, such as a database failure, goes to the central `errorHandler`, so it is logged and never looks like a bad token. An `authorize('admin')` middleware then checks `req.user.role` on admin routes. |
+| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. `protect` handles authentication failures itself: a missing, invalid, expired, or revoked token, or one issued before the last password change, gets a `401` in the standard `{ success: false, message }` shape, sent directly from `protect`. Any other error, such as a database failure, is passed to the central `errorHandler` with `next(err)`, so it is logged and never looks like a bad token. An `authorize('admin')` middleware then checks `req.user.role` on admin routes. |
 | **Revocation (logout)** | `POST /auth/logout` stores the token's `jti` and expiry in `RevokedToken`. A TTL index removes each entry once the token would have expired anyway. Trade-off: every protected request makes one extra database read, in exchange for a real server-side logout. Changing the password invalidates older tokens separately, through `passwordChangedAt`. |
 | **Authorization ≠ Authentication** | Being logged in isn't enough. Always check ownership (e.g. `listing.userId.equals(req.user._id)`) before editing or deleting. |
 | **Role from DB, not client** | Never accept `role` from the register request body. New users are always `user`. |
 
 > **Portfolio note:** For the MVP, storing the JWT in `localStorage` is acceptable and simple. Be ready to discuss the trade-off: it's exposed to XSS, whereas `httpOnly` cookies are exposed to CSRF instead. Mentioning this shows security awareness. The Zustand auth store uses the `persist` middleware, which saves the token and user in `localStorage`, so this same trade-off applies.
+
+> **Who formats which error?** Two layers, one rule: authentication errors (anything wrong with the token) are formatted by `protect`; everything else is formatted by `errorHandler`. Keeping JWT handling inside `protect` means `errorHandler` doesn't need to know about JWT internals, and a server fault can never be reported to the client as a `401` (which would also trigger the frontend's logout-on-`401` interceptor).
 
 ### 5.3 Passwords (bcrypt)
 
@@ -828,7 +830,7 @@ app.use(
 | **Rate limiting** | Use API Gateway throttling (burst/rate limits) to protect against abuse, especially `/auth/login`. |
 | **Secrets** | Never commit `.env`. Use Lambda environment variables (or Secrets Manager as an upgrade). |
 | **MongoDB Atlas access** | Use a dedicated DB user with least privilege. Lambda outside a VPC has changing IPs, so the MVP will likely need `0.0.0.0/0` in the Atlas IP allow-list. Compensate with a strong password, TLS, and a limited-privilege user. Note this trade-off in your docs. Private networking (VPC peering/PrivateLink) is the production-grade fix. |
-| **Error handling** | A central `errorHandler` returns `{ success: false, message }`. It maps JWT errors, duplicate keys, validation errors, and invalid IDs to clean 4xx responses. In production, unexpected 500s return a generic message to the client but are **always logged** to CloudWatch. It never leaks stack traces or DB errors. It relies on `NODE_ENV=production` being set on Lambda. |
+| **Error handling** | A central `errorHandler` returns `{ success: false, message }`. It maps duplicate keys (`11000`), validation errors (Mongoose and VineJS), and invalid IDs to clean 4xx responses. JWT errors are not handled here: `protect` responds to them itself (see 5.2). In production, unexpected 500s return a generic message to the client but are **always logged** to CloudWatch. It never leaks stack traces or DB errors. It relies on `NODE_ENV=production` being set on Lambda. |
 | **Logging** | `console.log` and `console.error` in Lambda go to **CloudWatch Logs** automatically. Log every 500 error. Don't log passwords or tokens. |
 | **Dependencies** | Run `npm audit` periodically. |
 
