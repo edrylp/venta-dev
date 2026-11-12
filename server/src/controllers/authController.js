@@ -72,7 +72,35 @@ const login = async (req, res, next) => {
   }
 ;}
 
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.validated.body;
+
+    const user = await User.findById(req.user._id).select("+password");
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+        },
+        token: generateToken(user._id),
+      }
+    });
+
+  } catch (error) {
+    next(error);
+  } 
+};
+
 export default {
   register,
   login,
+  changePassword,
 };
