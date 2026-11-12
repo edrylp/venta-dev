@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "test": "vitest run",
-    "start": "node server.js"
+    "start": "node server.js",
+    "seedadmin": "node scripts/seedAdmin.js"
   },
   "keywords": [],
   "type": "module",
