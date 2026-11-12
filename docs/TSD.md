@@ -499,7 +499,9 @@ export default connectDatabase;
 
 ## 4. API Endpoints & Routes (RESTful)
 
-**Base URL:** `https://<api-id>.execute-api.<region>.amazonaws.com/<stage>/api`
+**Base URL:** `https://<api-id>.execute-api.<region>.amazonaws.com/api` (local: `http://localhost:<PORT>/api`)
+
+- **Path prefix:** Express mounts every router under `/api` itself (`app.use("/api/auth", authRoutes)`). API Gateway uses the `$default` stage, so no stage name appears in the path and no path rewriting is needed. The same route table works locally, on Lambda, and in Postman.
 
 **Conventions**
 
@@ -517,6 +519,28 @@ export default connectDatabase;
 | `POST` | `/auth/login` | Public | Log in with `email` + `password`. Returns user + JWT. |
 | `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. |
 | `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its `jti` and expiry in `RevokedToken`. Safe to call twice. |
+
+**Response shape for `POST /auth/register` (`201`) and `POST /auth/login` (`200`)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "_id": "…",
+      "username": "ventauser",
+      "email": "ventauser@example.com",
+      "role": "user"
+    },
+    "token": "<JWT>"
+  }
+}
+```
+
+- `user` contains exactly `_id`, `username`, `email`, and `role`. The password hash is never returned. 
+- `role` is included so the frontend can show or hide admin UI. It is only a UI hint: the server reads the role from the database on every protected request (see 5.2), so changing it client-side grants nothing.
+- The user's own `email` is returned to that user only. Email is never returned in public responses (see the privacy note in 3.1).
+- A failed login returns `401` with `{ "success": false, "message": "Invalid email or password" }`, the same message for an unknown email and a wrong password (see 5.3).
 
 ### 4.2 Listings
 
@@ -617,6 +641,16 @@ export const handler = async (event, context) => {
   return expressHandler(event, context);
 };
 ```
+
+### 4.8 Health and Temporary Verification Routes
+
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| `GET` | `/health` | Public | Confirms the server is running. Permanent. |
+| `GET` | `/health/protected` | User | **Temporary (Phase 1).** Returns the authenticated user's `_id` and `role`. Used to verify `protect`. Removed in Phase 2. |
+| `GET` | `/health/admin` | Admin | **Temporary (Phase 1).** Same response, behind `protect` and `authorize('admin')`. Used to verify `authorize`. Removed in Phase 2. |
+
+These exist so middleware can be tested before any real protected route exists. Once the listing and admin routes exist (Phase 2), the two temporary routes are deleted, and real routes cover `protect` and `authorize`. 
 
 > **Why no `dbReady` here?** `connectDatabase()` already caches the connection and clears a failed attempt (see 3.6). A second cache in the handler would remember a failed first connect for the life of the warm container.
 
@@ -910,7 +944,7 @@ app.use(
 | `S3_PUBLIC_BASE_URL` | Lambda | Public base URL used to build image URLs from keys, e.g. `https://venta-uploads.s3.<region>.amazonaws.com` |
 | `AWS_REGION` | Lambda | Set by AWS automatically in Lambda (don't set `AWS_ACCESS_KEY_ID`; use the IAM role) |
 | `FRONTEND_URL` | Lambda | `https://ventaph.vercel.app` (used for CORS) |
-| `VITE_API_URL` | Vercel | `https://<api-id>.execute-api.<region>.amazonaws.com/<stage>/api` |
+| `VITE_API_URL` | Vercel | `https://<api-id>.execute-api.<region>.amazonaws.com/api` |
 
 #### MongoDB Atlas
 
