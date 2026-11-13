@@ -3,6 +3,8 @@ import {
   PutObjectCommand,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { randomUUID } from "node:crypto";
 
 export const ALLOWED_TYPES = {
   "image/jpeg": "jpg",
@@ -27,3 +29,20 @@ export const hasValidUserKeys = (userId, keys) =>
       key.startsWith(keyPrefix(userId)) &&
       !key.includes(".."),
   );
+
+export const createUploadUrl = async ({ userId, contentType, size }) => {
+  const key = `${keyPrefix(userId)}${randomUUID()}.${ALLOWED_TYPES[contentType]}`;
+
+  const command = new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET,
+    Key: key,
+    ContentType: contentType,
+    ContentLength: size,
+  });
+
+  const uploadUrl = await getSignedUrl(getClient(), command, {
+    expiresIn: URL_TTL_SECONDS,
+  });
+
+  return { key, uploadUrl };
+};
