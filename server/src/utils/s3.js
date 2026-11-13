@@ -46,3 +46,16 @@ export const createUploadUrl = async ({ userId, contentType, size }) => {
 
   return { key, uploadUrl };
 };
+
+export const publicUrl = (key) => `${process.env.S3_PUBLIC_BASE_URL}/${key}`;
+
+export const deleteObjects = async (keys) => {
+  if (!keys?.length) return;
+
+  await getClient().send(
+    new DeleteObjectsCommand({
+      Bucket: process.env.S3_BUCKET,
+      Delete: { Object: keys.map((key) => ({ Key: key })) },
+    }),
+  );
+};
