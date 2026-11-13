@@ -39,20 +39,30 @@ venta/
 │   ├── PRD.md
 │   └── TSD.md
 ├── server/
+│   ├── scripts/
+│   │   └── seedAdmin.js           # Admin-seeding script
 │   ├── src/
 │   │   ├── config/
-│   │   │   └── database.js        # Cached MongoDB connection
+│   │   │   ├── database.js        # Cached MongoDB connection
 │   │   │   └── vine.js            # VineJS custom error messages
+│   │   ├── controllers/           
+│   │   │   └── authController.js  # Register, login, changePassword, logout controllers
 │   │   ├── middleware/
-│   │   │   └── errorHandler.js    # Centralized error handler
+│   │   │   ├── authorize.js       # RBAC authorization middleware
+│   │   │   ├── errorHandler.js    # Centralized error handler
+│   │   │   ├── protect.js         # JWT verification & token revocation middleware
 │   │   │   └── validate.js        # VineJS validator
 │   │   ├── models/
-│   │   │   └── RevokedToken.js    # Revoked JWT IDs with a TTL index
+│   │   │   ├── RevokedToken.js    # Revoked JWT IDs with a TTL index
 │   │   │   └── User.js            # User schema and password hashing
+│   │   ├── routes/
+│   │   │   └── authRoutes.js      # Auth routes
+│   │   ├── utils/
+│   │   │   └── generateToken.js   # JWT signing utility
 │   │   ├── validators/
 │   │   │   └── authValidators.js  # VineJS schemas for the auth endpoints
 │   │   ├── app.js                 # Express app configuration; exports app
-│   │   └── server.js              # Local dev entry point
+│   │   └── server.js              # Local development server  
 │   ├── tests/
 │   │   └── validation.test.js
 │   ├── .env                       # Backend environment variables (gitignored)
