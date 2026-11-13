@@ -78,6 +78,7 @@ Prerequisites: Node.js and a MongoDB Atlas database.
 1. Clone the repo.
 2. `cd server`, copy `.env.example` to `.env`, fill in the values.
 3. Install dependencies and run `npm run dev`.
+4. To seed an admin account, run `npm run seedadmin`.
 
 ## Documentation
 
