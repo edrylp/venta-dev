@@ -5,6 +5,7 @@ import errorHandler from "./middleware/errorHandler.js";
 import authRoutes from "./routes/authRoutes.js";
 import protect from "./middleware/protect.js";
 import authorize from "./middleware/authorize.js";
+import uploadRoutes from "./routes/uploadRoutes.js";
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.get("/api/health/admin", protect, authorize("admin"), (req, res) => {
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "Route not found" });
