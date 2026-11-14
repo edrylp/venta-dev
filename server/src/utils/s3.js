@@ -17,7 +17,10 @@ const URL_TTL_SECONDS = 300; // presigned URL valid only for 5 minutes
 
 let client;
 const getClient = () =>
-  (client ??= new S3Client({ region: process.env.AWS_REGION }));
+  (client ??= new S3Client({
+    region: process.env.AWS_REGION,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  }));
 
 export const keyPrefix = (userId) => `listings/${userId}/`;
 
@@ -42,6 +45,7 @@ export const createUploadUrl = async ({ userId, contentType, size }) => {
 
   const uploadUrl = await getSignedUrl(getClient(), command, {
     expiresIn: URL_TTL_SECONDS,
+    signableHeaders: new Set(["content-length", "content-type"]),
   });
 
   return { key, uploadUrl };
