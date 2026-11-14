@@ -10,6 +10,6 @@ export const presignValidator = vine.create({
         size: vine.number().withoutDecimals().min(1).max(MAX_FILE_SIZE),
       }),
     )
-    .minlength(1)
+    .minLength(1)
     .maxLength(MAX_FILES),
 });
