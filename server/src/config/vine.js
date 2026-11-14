@@ -18,8 +18,8 @@ vine.messagesProvider = new SimpleMessagesProvider(
         "newPassword.maxLength": "New password cannot exceed 72 characters",
 
         // presign uploads
-        "files.minLength": "Add at least {{ min }} photo",
-        "files.maxLength": "You can upload at most {{ max }} photos",
+        "files.array.minLength": "Please add at least {{ min }} photo",
+        "files.array.maxLength": "You can upload at most {{ max }} photos",
         "files.*.contentType.enum": "Only JPEG, PNG, or WebP photos are allowed",
         "files.*.size.max": "Each photo must be 5 MB or smaller",
         "files.*.size.min": "Photo cannot be empty",
