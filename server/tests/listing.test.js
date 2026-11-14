@@ -39,3 +39,14 @@ describe("Listing model: images", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("Listing model: imageUrls", () => {
+  it("builds public URLs from stored keys in toJSON", () => {
+    const keys = makeKeys(2);
+    const json = makeListing(keys).toJSON();
+
+    expect(json.imageUrls).toEqual(
+      keys.map((k) => `${process.env.S3_PUBLIC_BASE_URL}/${k}`),
+    );
+  });
+});
