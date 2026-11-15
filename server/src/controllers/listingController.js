@@ -24,4 +24,6 @@ const createListing = async (req, res, next) => {
   }
 };
 
-export default createListing;
+export default { 
+    createListing 
+};
