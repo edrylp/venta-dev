@@ -1,9 +1,17 @@
 import Listing from "../models/Listing.js";
+import { hasValidUserKeys } from "../utils/s3.js";
 
 const createListing = async (req, res, next) => {
   try {
     const { category, title, price, description, location, images } =
       req.validated.body;
+
+    if (!hasValidUserKeys(req.user._id, images)) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid image keys"
+        });
+    }
 
     const newListing = await Listing.create({
       userId: req.user._id,
