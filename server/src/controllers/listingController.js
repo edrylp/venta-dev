@@ -31,3 +31,32 @@ export const createListing = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getListings = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, category } = req.validated.query;
+    const skip = (page - 1) * limit;
+
+    const filter = { status: "available" };
+    if (category) {
+      filter.category = category;
+    }
+
+    const [listings, total] = await Promise.all([
+      Listing.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select("-description -rejectionReason"),
+      Listing.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: listings,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
