@@ -2,7 +2,7 @@ import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
 import RevokedToken from "../models/RevokedToken.js";
 
-const register = async (req, res, next) => {
+export const register = async (req, res, next) => {
   try {
     const { username, email, password } = req.validated.body;
 
@@ -41,7 +41,7 @@ const register = async (req, res, next) => {
   }
 };
 
-const login = async (req, res, next) => {
+export const login = async (req, res, next) => {
   try {
     const { email, password } = req.validated.body;
 
@@ -72,7 +72,7 @@ const login = async (req, res, next) => {
   }
 ;}
 
-const changePassword = async (req, res, next) => {
+export const changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.validated.body;
 
@@ -113,7 +113,7 @@ const changePassword = async (req, res, next) => {
   } 
 };
 
-const logout = async (req, res, next) => {
+export const logout = async (req, res, next) => {
   try {
     const { jti, exp } = req.auth ?? {};
 
@@ -129,11 +129,4 @@ const logout = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};
-
-export default {
-  register,
-  login,
-  changePassword,
-  logout,
 };

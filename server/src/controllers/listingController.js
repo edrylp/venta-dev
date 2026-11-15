@@ -1,7 +1,7 @@
 import Listing from "../models/Listing.js";
 import { hasValidUserKeys } from "../utils/s3.js";
 
-const createListing = async (req, res, next) => {
+export const createListing = async (req, res, next) => {
   try {
     const { category, title, price, description, location, images } =
       req.validated.body;
@@ -30,8 +30,4 @@ const createListing = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-};
-
-export default { 
-    createListing 
 };
