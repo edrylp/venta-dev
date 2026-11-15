@@ -1,6 +1,6 @@
 import { createUploadUrl } from "../utils/s3.js";
 
-const presignUploads = async (req, res, next) => {
+export const presignUploads = async (req, res, next) => {
   try {
     const { files } = req.validated.body;
 
@@ -21,5 +21,3 @@ const presignUploads = async (req, res, next) => {
     next(err);
   }
 };
-
-export default presignUploads;
