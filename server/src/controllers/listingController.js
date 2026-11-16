@@ -7,10 +7,10 @@ export const createListing = async (req, res, next) => {
       req.validated.body;
 
     if (!hasValidUserKeys(req.user._id, images)) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid image keys"
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid image keys",
+      });
     }
 
     const newListing = await Listing.create({
@@ -103,6 +103,65 @@ export const getListingById = async (req, res, next) => {
       success: true,
       data: listing,
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const editListing = async (req, res, next) => {
+  try {
+    const updates = req.validated.body;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, message: "No fields to update" });
+    }
+
+    const listing = await Listing.findById(req.validated.params.id);
+    const isOwner = req.user && listing.userId.equals(req.user._id);
+
+    if (!listing || !isOwner) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Listing not found" 
+      });
+    }
+
+    if (listing.status === sold) {
+      return res.status(409).json({ 
+        success: false, 
+        message: "A sold listing can't be updated" 
+      });
+    }
+
+    let removedKeys = [];
+    if (updates.images) {
+      updates.images = [...new Set(updates.images)]; // drop duplicates
+      if (!hasValidUserKeys(req.user._id, updates.images)) {
+        return res.status(400).json({ success: false, message: "Invalid image keys" });
+      }
+      removedKeys = listing.images.filter((key) => !updates.images.includes(key));
+    }
+
+    Object.assign(listing, updates);
+    if (listing.status !== "pending") {
+      listing.status = "pending";
+      listing.rejectionReason = null;
+    }
+
+    await listing.save();
+
+    // Delete from S3 only after the save succeeds. A failure here leaves an orphan, not a broken listing.
+    try { 
+      await deleteObjects(removedKeys); 
+    }  catch (err) { 
+      console.error("S3 cleanup failed:", err); 
+    }
+    
+    return res.status(200).json({
+      success: true,
+      data: listing,
+    });
+
   } catch (err) {
     next(err);
   }
