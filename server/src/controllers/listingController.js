@@ -117,7 +117,7 @@ export const editListing = async (req, res, next) => {
     }
 
     const listing = await Listing.findById(req.validated.params.id);
-    const isOwner = req.user && listing.userId.equals(req.user._id);
+    const isOwner = listing?.userId.equals(req.user._id);
 
     if (!listing || !isOwner) {
       return res.status(404).json({ 
