@@ -1,5 +1,5 @@
 import Listing from "../models/Listing.js";
-import { hasValidUserKeys } from "../utils/s3.js";
+import { hasValidUserKeys, deleteObjects } from "../utils/s3.js";
 
 export const createListing = async (req, res, next) => {
   try {
@@ -126,7 +126,7 @@ export const editListing = async (req, res, next) => {
       });
     }
 
-    if (listing.status === sold) {
+    if (listing.status === "sold") {
       return res.status(409).json({ 
         success: false, 
         message: "A sold listing can't be updated" 
