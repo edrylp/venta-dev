@@ -1,7 +1,7 @@
 import {
   S3Client,
   PutObjectCommand,
-  DeleteObjectsCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
@@ -56,10 +56,19 @@ export const publicUrl = (key) => `${process.env.S3_PUBLIC_BASE_URL}/${key}`;
 export const deleteObjects = async (keys) => {
   if (!keys?.length) return;
 
-  await getClient().send(
-    new DeleteObjectsCommand({
-      Bucket: process.env.S3_BUCKET,
-      Delete: { Object: keys.map((key) => ({ Key: key })) },
-    }),
+  const results = await Promise.allSettled(
+    keys.map((Key) =>
+      getClient().send(
+        new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key }),
+      ),
+    ),
   );
+
+  const failed = results.filter((result) => result.status === "rejected");
+
+  if (failed.length) {
+    throw new Error(
+      `S3 delete failed for ${failed.length} of ${keys.length} objects: ${failed[0].reason?.name}`,
+    );
+  }
 };
