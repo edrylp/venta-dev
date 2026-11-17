@@ -5,6 +5,7 @@ import {
   getMyListings,
   getListingById,
   editListing,
+  deleteListing,
 } from "../controllers/listingController.js";
 import { protect, optionalAuth } from "../middleware/protect.js";
 import validate from "../middleware/validate.js";
@@ -37,5 +38,8 @@ router.patch(
   validate(updateListingValidator, "body"),
   editListing,
 );
+
+// Delete a listing
+router.delete("/:id", protect, validate(idParamValidator, "params"), deleteListing);
 
 export default router;

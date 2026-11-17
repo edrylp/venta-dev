@@ -117,7 +117,7 @@ export const editListing = async (req, res, next) => {
     }
 
     const listing = await Listing.findById(req.validated.params.id);
-    const isOwner = req.user && listing.userId.equals(req.user._id);
+    const isOwner = listing?.userId.equals(req.user._id);
 
     if (!listing || !isOwner) {
       return res.status(404).json({ 
@@ -166,3 +166,34 @@ export const editListing = async (req, res, next) => {
     next(err);
   }
 };
+
+export const deleteListing = async (req, res, next) => {
+  try {
+    const listing = await Listing.findById(req.validated.params.id);
+
+    const isOwner = listing?.userId.equals(req.user._id);
+    const isAdmin = req.user.role === "admin";
+
+    if (!listing || (!isOwner && !isAdmin)) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Listing not found" 
+      });
+    }
+
+    await listing.deleteOne();
+
+    try { 
+      await deleteObjects(listing.images); 
+    }  catch (err) { 
+      console.error("S3 cleanup failed:", err); 
+    }
+    
+    return res.status(200).json({
+      success: true,
+      data: { message: "Successfully deleted"},
+    });
+  } catch (err) {
+    next(err);
+  }
+}
