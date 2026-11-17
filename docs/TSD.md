@@ -325,6 +325,9 @@ listingSchema.index({ status: 1, price: 1 });
 // Public listings filtered by category and sorted by price
 listingSchema.index({ category: 1, status: 1, price: 1 });
 
+// Public listings filtered by category, newest first
+listingSchema.index({ category: 1, status: 1, createdAt: -1 });
+
 // Keyword search
 listingSchema.index({ title: "text", description: "text" });
 
@@ -838,7 +841,16 @@ const images = uploads.map((u) => u.key);
 
 ### 5.4 Input Validation & Sanitization
 
-- - Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
+- Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
+
+  | Field | Rule | Why |
+  | --- | --- | --- |
+  | `:id` params | Valid ObjectId (`idParamValidator`, shared by all routes with an id) | Malformed ids return `400` instead of a database cast error |
+  | `images` | 1 to 10 keys, all distinct, each under the owner's prefix | Stops the same photo being attached twice, and other users' files being attached |
+  | `price` | At least 1, at most 2 decimal places | Prices are pesos and centavos, never fractions of a centavo |
+  | `q` | String, max 100 characters | Keeps keyword search bounded |
+  | `rejectionReason` | Required when rejecting, at least 5 characters (model max 500) | Forces a reason the seller can act on |
+
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`): validate that inputs are strings. `sanitizeFilter` is also enabled globally (see 3.6).
 - Validate `images[]` with `hasValidUserKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
@@ -996,6 +1008,8 @@ app.use(
 | `AWS_REGION` | Lambda | Set by AWS automatically in Lambda (don't set `AWS_ACCESS_KEY_ID`; use the IAM role) |
 | `FRONTEND_URL` | Lambda | `https://ventaph.vercel.app` (used for CORS) |
 | `VITE_API_URL` | Vercel | `https://<api-id>.execute-api.<region>.amazonaws.com/api` |
+| `AWS_PROFILE` | Local `.env` only | Named AWS CLI profile the S3 client uses in local development. Never set on Lambda, which uses the execution role. |
+| `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Local `.env` only | Read by the admin seed script (scripts/seedAdmin.js) only. Not used by the app or set on Lambda. |
 
 #### MongoDB Atlas
 
