@@ -6,6 +6,7 @@ import {
   getListingById,
   editListing,
   deleteListing,
+  markListingAsSold,
 } from "../controllers/listingController.js";
 import { protect, optionalAuth } from "../middleware/protect.js";
 import validate from "../middleware/validate.js";
@@ -41,5 +42,8 @@ router.patch(
 
 // Delete a listing
 router.delete("/:id", protect, validate(idParamValidator, "params"), deleteListing);
+
+// Mark a listing as sold
+router.patch("/:id/sold", protect, validate(idParamValidator, "params"), markListingAsSold);
 
 export default router;
