@@ -694,40 +694,60 @@ These exist so middleware can be tested before any real protected route exists. 
 
 ```js
 // src/utils/s3.js
-import { S3Client, PutObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
-export const ALLOWED_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+export const ALLOWED_TYPES = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB per photo
-export const MAX_FILES = 10;
-const URL_TTL_SECONDS = 300; // presigned URL valid for 5 minutes
+export const MAX_FILES = 10; // 10 photos limit for upload
+const URL_TTL_SECONDS = 300; // presigned URL valid only for 5 minutes
 
 // Created lazily so dotenv has already loaded. On Lambda, credentials come from the execution role.
 let client;
-const getClient = () => (client ??= new S3Client({ region: process.env.AWS_REGION }));
+const getClient = () =>
+  (client ??= new S3Client({
+    region: process.env.AWS_REGION,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  }));
 
 // Every user can only upload under their own prefix.
-export const keyPrefixFor = (userId) => `listings/${userId}/`;
+export const keyPrefix = (userId) => `listings/${userId}/`;
 
 // True only if every key is a string inside this user's prefix.
-export const ownsKeys = (userId, keys) =>
+export const hasValidUserKeys = (userId, keys) =>
   Array.isArray(keys) &&
-  keys.every((k) => typeof k === "string" && k.startsWith(keyPrefixFor(userId)) && !k.includes(".."));
+  keys.every(
+    (key) =>
+      typeof key === "string" &&
+      key.startsWith(keyPrefix(userId)) &&
+      !key.includes(".."),
+  );
 
 export const createUploadUrl = async ({ userId, contentType, size }) => {
-  const key = `${keyPrefixFor(userId)}${randomUUID()}.${ALLOWED_TYPES[contentType]}`;
+  const key = `${keyPrefix(userId)}${randomUUID()}.${ALLOWED_TYPES[contentType]}`;
+
   const command = new PutObjectCommand({
     Bucket: process.env.S3_BUCKET,
     Key: key,
     ContentType: contentType,
-    ContentLength: size, 
+    ContentLength: size,
   });
+
   const uploadUrl = await getSignedUrl(getClient(), command, {
     expiresIn: URL_TTL_SECONDS,
-    // Sign content-length so S3 rejects an upload whose size differs from the size the server validated
-    signableHeaders: new Set(["content-length"]),
+    // Sign both headers so S3 rejects an upload whose size or type differs from what the server validated
+    signableHeaders: new Set(["content-length", "content-type"]),
   });
+
   return { key, uploadUrl };
 };
 
@@ -736,14 +756,27 @@ export const publicUrl = (key) => `${process.env.S3_PUBLIC_BASE_URL}/${key}`;
 
 export const deleteObjects = async (keys) => {
   if (!keys?.length) return;
-  await getClient().send(
-    new DeleteObjectsCommand({
-      Bucket: process.env.S3_BUCKET,
-      Delete: { Objects: keys.map((Key) => ({ Key })) },
-    }),
+
+  const results = await Promise.allSettled(
+    keys.map((Key) =>
+      getClient().send(
+        new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key }),
+      ),
+    ),
   );
+
+  const failed = results.filter((result) => result.status === "rejected");
+
+  if (failed.length) {
+    throw new Error(
+      `S3 delete failed for ${failed.length} of ${keys.length} objects: ${failed[0].reason?.name}`,
+    );
+  }
 };
 ```
+> **Why `requestChecksumCalculation: "WHEN_REQUIRED"`?** Newer versions of the AWS SDK add checksum parameters to presigned URLs by default. A plain browser `PUT` doesn't send them, so the upload fails. Setting the option to `WHEN_REQUIRED` keeps the signed URL compatible with a simple `fetch` PUT.
+
+> **Why one delete per key?** The batch `DeleteObjectsCommand` failed with a `MalformedXML` error on the SDK version in use (`@aws-sdk/client-s3` 3.1168.0), even with a valid key array. A listing has at most 10 photos, so one `DeleteObjectCommand` per key with `Promise.allSettled` costs almost nothing. If any delete fails, `deleteObjects` throws one summary error. The controllers catch and log it, and the request still succeeds because the database is already updated. The accepted trade-off is a possible orphaned object in S3.
 
 > **How the 5 MB limit is enforced:** three layers. The browser checks the size first (quick feedback only). The presign endpoint rejects any declared size over 5 MB. S3 then enforces the declared size, because `content-length` is a signed header, so an upload of a different size fails the signature check. Only the S3 layer can't be bypassed by a modified client. Verify it in Phase 2; if S3 still accepts an oversized file, switch to a presigned POST with a `content-length-range` condition.
 
@@ -808,7 +841,7 @@ const images = uploads.map((u) => u.key);
 - - Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`): validate that inputs are strings. `sanitizeFilter` is also enabled globally (see 3.6).
-- Validate `images[]` with `ownsKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
+- Validate `images[]` with `hasValidUserKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
 
 
