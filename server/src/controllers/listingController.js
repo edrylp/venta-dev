@@ -196,4 +196,35 @@ export const deleteListing = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-}
+};
+
+export const markListingAsSold = async (req, res, next) => {
+  try {
+    const listing = await Listing.findById(req.validated.params.id);
+    const isOwner = listing?.userId.equals(req.user._id);
+
+    if (!listing || !isOwner) {
+      return res.status(404).json({
+        success: false,
+        message: "Listing not found",
+      });
+    }
+
+    if (listing.status !== "available") {
+      return res.status(409).json({
+        success: false,
+        message: "Only available listings can be marked as sold",
+      });
+    }
+
+    listing.status = "sold";
+    await listing.save();
+
+    return res.status(200).json({
+      success: true,
+      data: { message: "Listing marked as sold" },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
