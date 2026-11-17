@@ -524,8 +524,8 @@ export default connectDatabase;
 |--------|----------|--------|-------------|
 | `POST` | `/auth/register` | Public | Create an account (`username`, `email`, `password`). Returns user + JWT. |
 | `POST` | `/auth/login` | Public | Log in with `email` + `password`. Returns user + JWT. |
-| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. |
-| `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its `jti` and expiry in `RevokedToken`. Safe to call twice. |
+| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. newPassword must differ from currentPassword (400). |
+| `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its jti and expiry in RevokedToken. The token stops working immediately, so calling logout again with the same token returns 401. The frontend clears its auth store whether or not the request succeeds. |
 
 **Response shape for `POST /auth/register` (`201`) and `POST /auth/login` (`200`)**
 
@@ -632,7 +632,7 @@ venta/
     │   ├── validators/     # VineJS schemas
     │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
     │   └── utils/          # s3.js, generateToken.js
-    ├── tests/              # Vitest + Supertest
+    ├── tests/              # Vitest + Supertest + mongodb-memory-server
     ├── .env                # Local only (gitignored); Lambda uses function environment variables
     ├── .env.example        # Template listing every variable (no secrets), committed
     └── package.json
@@ -785,8 +785,9 @@ const images = uploads.map((u) => u.key);
 | **Payload** | Include only `id` (user ID) and `jti` (a unique token ID used for revocation). The role is not in the token: `protect` loads it from the database, so a role change takes effect immediately. Never put passwords or sensitive data in a JWT (it's encoded, not encrypted). |
 | **Expiry** | Short-lived tokens (e.g. `1h`–`7d` depending on how much complexity you want). |
 | **Transport** | HTTPS only. Send in the `Authorization: Bearer` header. |
-| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. `protect` handles authentication failures itself: a missing, invalid, expired, or revoked token, or one issued before the last password change, gets a `401` in the standard `{ success: false, message }` shape, sent directly from `protect`. Any other error, such as a database failure, is passed to the central `errorHandler` with `next(err)`, so it is logged and never looks like a bad token. An `authorize('admin')` middleware then checks `req.user.role` on admin routes. |
-| **Revocation (logout)** | `POST /auth/logout` stores the token's `jti` and expiry in `RevokedToken`. A TTL index removes each entry once the token would have expired anyway. Trade-off: every protected request makes one extra database read, in exchange for a real server-side logout. Changing the password invalidates older tokens separately, through `passwordChangedAt`. |
+| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens whose user no longer exists, rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. `protect` handles authentication failures itself: a missing, invalid, expired, or revoked token, a token whose user no longer exists, or one issued before the last password change, gets a `401` in the standard `{ success: false, message }` shape, sent directly from `protect`. Any other error, such as a database failure, is passed to the central `errorHandler` with `next(err)`, so it is logged and never looks like a bad token. `protect` also attaches the decoded token payload as `req.auth` (logout reads `jti` and `exp` from it). An `authorize('admin')` middleware then checks `req.user.role` on admin routes, and returns `401` if `req.user` is missing, so a route wired without `protect` fails loudly instead of silently. |
+| **Optional auth** | `GET /listings/:id` uses `optionalAuth`, which shares `protect`'s `authenticate()` helper but never rejects. Any token that would fail `protect` (missing, invalid, expired, revoked, issued before a password change, or for a deleted user) is treated as a guest. This lets the controller show a non-available listing only to its owner or an admin, without a stale token blocking a public page. Database errors still go to `errorHandler` with `next(err)`. |
+| **Revocation (logout)** | `POST /auth/logout` stores the token's `jti` and expiry in `RevokedToken`. A TTL index removes each entry once the token would have expired anyway. Trade-off: every protected request makes one extra database read, in exchange for a real server-side logout. Changing the password invalidates older tokens separately, through `passwordChangedAt`. A revoked token is rejected by `protect` everywhere, including on a second logout. |
 | **Authorization ≠ Authentication** | Being logged in isn't enough. Always check ownership (e.g. `listing.userId.equals(req.user._id)`) before editing or deleting. |
 | **Role from DB, not client** | Never accept `role` from the register request body. New users are always `user`. |
 
@@ -1033,6 +1034,7 @@ A short, honest "next steps" list also tells hiring managers you can think beyon
 | **Infrastructure as Code & CI/CD pipeline** | Repeatable, automated deployments. |
 | **Private networking for Atlas (VPC)** | Removes the need for open IP allow-listing. |
 | **Spec filters per category** (e.g. GPU VRAM, RAM capacity) | Richer search; would use a flexible `specs` sub-document. |
+| **Idempotent logout** | A second logout with an already-revoked token would return 200 instead of 401. It needs a variant of protect that skips only the revoked check, plus an upsert on RevokedToken. |
 
 ---
 
