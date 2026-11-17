@@ -553,14 +553,14 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/listings` | Public | Get **available** listings. Supports query filters (below). |
+| `GET` | `/listings` | Public | Get **available** listings. Supports query filters (below). The response includes pagination: { page, limit, total, totalPages }. List items omit description and rejectionReason. |
 | `GET` | `/listings/my-listings` | User | Get the current user's own listings (all statuses). |
-| `GET` | `/listings/:id` | Public | Get one listing. Listings that aren't `available` are visible only to the owner or an admin. The seller is shown by `username` only. |
+| `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. |
 | `POST` | `/listings` | User | Create a listing with 1 to 10 images (S3 keys from the presign step). Status starts as `pending`. |
-| `PATCH` | `/listings/:id` | Owner | Update a listing. Editing an `available` or `rejected` listing sends it back to `pending` and clears `rejectionReason`; editing a `pending` listing keeps it `pending`; a `sold` listing can't be edited (`409`). Owner can also set `status: "sold"`, only from `available` (otherwise `409`). Images must stay between 1 and 10 and belong to the owner. Photos removed from the listing are deleted from S3. |
-| `DELETE` | `/listings/:id` | Owner / Admin | Delete a listing and its photos in S3. Conversations and messages are kept. |
+| `PATCH` | `/listings/:id` | Owner | Content edit only; status and rejectionReason are not accepted. An empty body returns 400. images is the full list of keys (1 to 10, under the owner’s prefix, otherwise 400). Editing an available or rejected listing sends it back to pending and clears rejectionReason; editing a pending listing keeps it pending; a sold listing returns 409. Photos removed from the list are deleted from S3. |
+| `DELETE` | `/listings/:id` | Owner / Admin | Deletes the listing, then its S3 photos (best-effort: failures are logged and don’t fail the request, so orphaned objects are possible). Conversations and messages are kept. |
 
-Listing responses include `imageUrls` (public URLs built from the stored keys).
+**Not found or not yours**: edit, mark as sold and delete return 404 for both a missing listing and one the caller can’t modify, so listing ids don’t leak. An admin can delete any listing but can’t edit or mark sold. Listing responses include `imageUrls` (public URLs built from the stored keys).
 
 **Query parameters for `GET /listings`**
 
