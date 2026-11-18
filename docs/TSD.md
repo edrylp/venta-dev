@@ -308,7 +308,12 @@ const listingSchema = new mongoose.Schema(
       default: "pending",
     },
     // Required when an admin rejects (checked in the controller); cleared when the seller resubmits
-    rejectionReason: { type: String, trim: true, maxlength: 500 },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: null,
+    },
   },
   { timestamps: true, toJSON: { virtuals: true }, id: false },
 );
