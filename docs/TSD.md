@@ -47,7 +47,7 @@ Buying and selling used PC hardware on general-purpose platforms is messy. Listi
 | Role | Capabilities |
 |------|--------------|
 | **Guest** | Browse listings, view item details, search and filter. Cannot post or message sellers. |
-| **User** (Buyer & Seller) | Everything a guest can do, plus: register/login/logout, change password, create/edit/delete own listings, upload 1 to 10 photos per listing, message other users. |
+| **User** (Buyer & Seller) | Everything a guest can do, plus: register/login/logout, change password, create/edit/delete own listings, mark own available listings as sold, upload 1 to 10 photos per listing, message other users. |
 | **Admin** | Review pending listings and approve or reject them. Delete any listing. |
 
 ### 1.4 Supported Categories
@@ -120,7 +120,7 @@ Every new listing starts as Pending. An admin either approves or rejects it. Edi
 | `pending` | Waiting for admin review | No | `available`, `rejected` |
 | `available` | Admin-approved, live on the site | Yes | `sold`, or `pending` if edited |
 | `rejected` | Admin said no (with a reason) | No | `pending` after the seller edits |
-| `sold` | Item is sold | No (owner and admin only) | None (final) |
+| `sold` | Seller marked the item as sold | No (owner and admin only) | None (final: can't be edited or reverted) |
 
 ```mermaid
 flowchart TD
