@@ -520,6 +520,7 @@ export default connectDatabase;
 - Standard status codes: `200` OK, `201` Created, `400` Bad Request, `401` Unauthorized, `403` Forbidden, `404` Not Found, `409` Conflict, `429` Too Many Requests.
 - Success shape: `{ "success": true, "data": ... }`
 - Error shape: `{ "success": false, "message": "Human-readable message" }`
+- Unmapped paths return `404` with `{ "success": false, "message": "Route not found" }`. This catch-all is registered after all routers and before `errorHandler`, so a wrong URL gets the same JSON error shape as everything else instead of Express's default HTML page.
 
 ### 4.1 Auth
 
