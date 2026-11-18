@@ -2,7 +2,7 @@
 
 > **Venta** is a C2C marketplace for used PCs and PC components.
 
-> **Author:** Edryl Palinis · **Version:** 1.1
+> **Author:** Edryl Palinis · **Version:** 1.2
 
 > **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
@@ -22,6 +22,7 @@
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2026-11-18 | Synced with Phase 2: listings API (ownership returns 404, `optionalAuth` on `GET /listings/:id`, `PATCH /listings/:id/sold`, delete behavior and response), auth and middleware (second logout returns 401), S3 (per-key delete, `requestChecksumCalculation`), models, validators and env vars, catch-all 404 handler, `MONGODB_URI` guard in `connectDatabase`, `rejectionReason` default, and mark-sold in the user capabilities and status lifecycle. |
 | 1.1 | 2026-11-12 | Synced with Phase 1: VineJS validation, auth response shape, health routes, `/api` prefix, tests moved to Phase 1, env var clarifications, `protect` vs `errorHandler`, project structure. |
 | 1.0 | 2026-11-08 | Initial final version. |
 
@@ -47,7 +48,7 @@ Buying and selling used PC hardware on general-purpose platforms is messy. Listi
 | Role | Capabilities |
 |------|--------------|
 | **Guest** | Browse listings, view item details, search and filter. Cannot post or message sellers. |
-| **User** (Buyer & Seller) | Everything a guest can do, plus: register/login/logout, change password, create/edit/delete own listings, upload 1 to 10 photos per listing, message other users. |
+| **User** (Buyer & Seller) | Everything a guest can do, plus: register/login/logout, change password, create/edit/delete own listings, mark own available listings as sold, upload 1 to 10 photos per listing, message other users. |
 | **Admin** | Review pending listings and approve or reject them. Delete any listing. |
 
 ### 1.4 Supported Categories
@@ -120,7 +121,7 @@ Every new listing starts as Pending. An admin either approves or rejects it. Edi
 | `pending` | Waiting for admin review | No | `available`, `rejected` |
 | `available` | Admin-approved, live on the site | Yes | `sold`, or `pending` if edited |
 | `rejected` | Admin said no (with a reason) | No | `pending` after the seller edits |
-| `sold` | Item is sold | No (owner and admin only) | None (final) |
+| `sold` | Seller marked the item as sold | No (owner and admin only) | None (final: can't be edited or reverted) |
 
 ```mermaid
 flowchart TD
@@ -308,7 +309,12 @@ const listingSchema = new mongoose.Schema(
       default: "pending",
     },
     // Required when an admin rejects (checked in the controller); cleared when the seller resubmits
-    rejectionReason: { type: String, trim: true, maxlength: 500 },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: null,
+    },
   },
   { timestamps: true, toJSON: { virtuals: true }, id: false },
 );
@@ -324,6 +330,9 @@ listingSchema.index({ status: 1, price: 1 });
 
 // Public listings filtered by category and sorted by price
 listingSchema.index({ category: 1, status: 1, price: 1 });
+
+// Public listings filtered by category, newest first
+listingSchema.index({ category: 1, status: 1, createdAt: -1 });
 
 // Keyword search
 listingSchema.index({ title: "text", description: "text" });
@@ -471,6 +480,10 @@ mongoose.set('sanitizeFilter', true);
 const connectDatabase = async () => {
   if (cached.conn) {return cached.conn;}
 
+  if (!process.env.MONGODB_URI) {
+    throw new Error("MONGODB_URI is not defined");
+  }
+
   if (!cached.promise) {
     cached.promise = mongoose
       .connect(process.env.MONGODB_URI, {
@@ -516,7 +529,9 @@ export default connectDatabase;
 - Protected routes require `Authorization: Bearer <JWT>`.
 - Standard status codes: `200` OK, `201` Created, `400` Bad Request, `401` Unauthorized, `403` Forbidden, `404` Not Found, `409` Conflict, `429` Too Many Requests.
 - Success shape: `{ "success": true, "data": ... }`
+- Actions with nothing to return (delete, logout) respond with `{ "success": true, "data": { "message": "..." } }`, so `data` is always an object.
 - Error shape: `{ "success": false, "message": "Human-readable message" }`
+- Unmapped paths return `404` with `{ "success": false, "message": "Route not found" }`. This catch-all is registered after all routers and before `errorHandler`, so a wrong URL gets the same JSON error shape as everything else instead of Express's default HTML page.
 
 ### 4.1 Auth
 
@@ -524,8 +539,8 @@ export default connectDatabase;
 |--------|----------|--------|-------------|
 | `POST` | `/auth/register` | Public | Create an account (`username`, `email`, `password`). Returns user + JWT. |
 | `POST` | `/auth/login` | Public | Log in with `email` + `password`. Returns user + JWT. |
-| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. |
-| `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its `jti` and expiry in `RevokedToken`. Safe to call twice. |
+| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. newPassword must differ from currentPassword (400). |
+| `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its jti and expiry in RevokedToken. The token stops working immediately, so calling logout again with the same token returns 401. The frontend clears its auth store whether or not the request succeeds. Returns `200` with `{ "success": true, "data": { "message": "Logged out successfully" } }`. |
 
 **Response shape for `POST /auth/register` (`201`) and `POST /auth/login` (`200`)**
 
@@ -553,14 +568,15 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/listings` | Public | Get **available** listings. Supports query filters (below). |
+| `GET` | `/listings` | Public | Get **available** listings. Supports query filters (below). The response includes pagination: { page, limit, total, totalPages }. List items omit description and rejectionReason. |
 | `GET` | `/listings/my-listings` | User | Get the current user's own listings (all statuses). |
-| `GET` | `/listings/:id` | Public | Get one listing. Listings that aren't `available` are visible only to the owner or an admin. The seller is shown by `username` only. |
+| `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. |
 | `POST` | `/listings` | User | Create a listing with 1 to 10 images (S3 keys from the presign step). Status starts as `pending`. |
-| `PATCH` | `/listings/:id` | Owner | Update a listing. Editing an `available` or `rejected` listing sends it back to `pending` and clears `rejectionReason`; editing a `pending` listing keeps it `pending`; a `sold` listing can't be edited (`409`). Owner can also set `status: "sold"`, only from `available` (otherwise `409`). Images must stay between 1 and 10 and belong to the owner. Photos removed from the listing are deleted from S3. |
-| `DELETE` | `/listings/:id` | Owner / Admin | Delete a listing and its photos in S3. Conversations and messages are kept. |
+| `PATCH` | `/listings/:id` | Owner | Content edit only; status and rejectionReason are not accepted. An empty body returns 400. images is the full list of keys (1 to 10, under the owner’s prefix, otherwise 400). Editing an available or rejected listing sends it back to pending and clears rejectionReason; editing a pending listing keeps it pending; a sold listing returns 409. Photos removed from the list are deleted from S3. |
+| `PATCH` | `/listings/:id/sold` | Owner | Mark the listing as sold. No request body. Only an `available` listing can be marked sold; any other status returns `409`. Returns 200 with `{ "success": false, data: { message: "Listing marked as sold" }`. |
+| `DELETE` | `/listings/:id` | Owner / Admin | Deletes the listing, then its S3 photos (best-effort: failures are logged and don’t fail the request, so orphaned objects are possible). Conversations and messages are kept. Returns `200` with `{ "success": true, "data": { "message": "Successfully deleted" } }`. |
 
-Listing responses include `imageUrls` (public URLs built from the stored keys).
+**Not found or not yours**: edit, mark as sold and delete return 404 for both a missing listing and one the caller can’t modify, so listing ids don’t leak. An admin can delete any listing but can’t edit or mark sold. Listing responses include `imageUrls` (public URLs built from the stored keys).
 
 **Query parameters for `GET /listings`**
 
@@ -632,7 +648,7 @@ venta/
     │   ├── validators/     # VineJS schemas
     │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
     │   └── utils/          # s3.js, generateToken.js
-    ├── tests/              # Vitest + Supertest
+    ├── tests/              # Vitest + Supertest + mongodb-memory-server
     ├── .env                # Local only (gitignored); Lambda uses function environment variables
     ├── .env.example        # Template listing every variable (no secrets), committed
     └── package.json
@@ -694,40 +710,60 @@ These exist so middleware can be tested before any real protected route exists. 
 
 ```js
 // src/utils/s3.js
-import { S3Client, PutObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
-export const ALLOWED_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+export const ALLOWED_TYPES = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB per photo
-export const MAX_FILES = 10;
-const URL_TTL_SECONDS = 300; // presigned URL valid for 5 minutes
+export const MAX_FILES = 10; // 10 photos limit for upload
+const URL_TTL_SECONDS = 300; // presigned URL valid only for 5 minutes
 
 // Created lazily so dotenv has already loaded. On Lambda, credentials come from the execution role.
 let client;
-const getClient = () => (client ??= new S3Client({ region: process.env.AWS_REGION }));
+const getClient = () =>
+  (client ??= new S3Client({
+    region: process.env.AWS_REGION,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  }));
 
 // Every user can only upload under their own prefix.
-export const keyPrefixFor = (userId) => `listings/${userId}/`;
+export const keyPrefix = (userId) => `listings/${userId}/`;
 
 // True only if every key is a string inside this user's prefix.
-export const ownsKeys = (userId, keys) =>
+export const hasValidUserKeys = (userId, keys) =>
   Array.isArray(keys) &&
-  keys.every((k) => typeof k === "string" && k.startsWith(keyPrefixFor(userId)) && !k.includes(".."));
+  keys.every(
+    (key) =>
+      typeof key === "string" &&
+      key.startsWith(keyPrefix(userId)) &&
+      !key.includes(".."),
+  );
 
 export const createUploadUrl = async ({ userId, contentType, size }) => {
-  const key = `${keyPrefixFor(userId)}${randomUUID()}.${ALLOWED_TYPES[contentType]}`;
+  const key = `${keyPrefix(userId)}${randomUUID()}.${ALLOWED_TYPES[contentType]}`;
+
   const command = new PutObjectCommand({
     Bucket: process.env.S3_BUCKET,
     Key: key,
     ContentType: contentType,
-    ContentLength: size, 
+    ContentLength: size,
   });
+
   const uploadUrl = await getSignedUrl(getClient(), command, {
     expiresIn: URL_TTL_SECONDS,
-    // Sign content-length so S3 rejects an upload whose size differs from the size the server validated
-    signableHeaders: new Set(["content-length"]),
+    // Sign both headers so S3 rejects an upload whose size or type differs from what the server validated
+    signableHeaders: new Set(["content-length", "content-type"]),
   });
+
   return { key, uploadUrl };
 };
 
@@ -736,14 +772,27 @@ export const publicUrl = (key) => `${process.env.S3_PUBLIC_BASE_URL}/${key}`;
 
 export const deleteObjects = async (keys) => {
   if (!keys?.length) return;
-  await getClient().send(
-    new DeleteObjectsCommand({
-      Bucket: process.env.S3_BUCKET,
-      Delete: { Objects: keys.map((Key) => ({ Key })) },
-    }),
+
+  const results = await Promise.allSettled(
+    keys.map((Key) =>
+      getClient().send(
+        new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key }),
+      ),
+    ),
   );
+
+  const failed = results.filter((result) => result.status === "rejected");
+
+  if (failed.length) {
+    throw new Error(
+      `S3 delete failed for ${failed.length} of ${keys.length} objects: ${failed[0].reason?.name}`,
+    );
+  }
 };
 ```
+> **Why `requestChecksumCalculation: "WHEN_REQUIRED"`?** Newer versions of the AWS SDK add checksum parameters to presigned URLs by default. A plain browser `PUT` doesn't send them, so the upload fails. Setting the option to `WHEN_REQUIRED` keeps the signed URL compatible with a simple `fetch` PUT.
+
+> **Why one delete per key?** The batch `DeleteObjectsCommand` failed with a `MalformedXML` error on the SDK version in use (`@aws-sdk/client-s3` 3.1168.0), even with a valid key array. A listing has at most 10 photos, so one `DeleteObjectCommand` per key with `Promise.allSettled` costs almost nothing. If any delete fails, `deleteObjects` throws one summary error. The controllers catch and log it, and the request still succeeds because the database is already updated. The accepted trade-off is a possible orphaned object in S3.
 
 > **How the 5 MB limit is enforced:** three layers. The browser checks the size first (quick feedback only). The presign endpoint rejects any declared size over 5 MB. S3 then enforces the declared size, because `content-length` is a signed header, so an upload of a different size fails the signature check. Only the S3 layer can't be bypassed by a modified client. Verify it in Phase 2; if S3 still accepts an oversized file, switch to a presigned POST with a `content-length-range` condition.
 
@@ -785,8 +834,9 @@ const images = uploads.map((u) => u.key);
 | **Payload** | Include only `id` (user ID) and `jti` (a unique token ID used for revocation). The role is not in the token: `protect` loads it from the database, so a role change takes effect immediately. Never put passwords or sensitive data in a JWT (it's encoded, not encrypted). |
 | **Expiry** | Short-lived tokens (e.g. `1h`–`7d` depending on how much complexity you want). |
 | **Transport** | HTTPS only. Send in the `Authorization: Bearer` header. |
-| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. `protect` handles authentication failures itself: a missing, invalid, expired, or revoked token, or one issued before the last password change, gets a `401` in the standard `{ success: false, message }` shape, sent directly from `protect`. Any other error, such as a database failure, is passed to the central `errorHandler` with `next(err)`, so it is logged and never looks like a bad token. An `authorize('admin')` middleware then checks `req.user.role` on admin routes. |
-| **Revocation (logout)** | `POST /auth/logout` stores the token's `jti` and expiry in `RevokedToken`. A TTL index removes each entry once the token would have expired anyway. Trade-off: every protected request makes one extra database read, in exchange for a real server-side logout. Changing the password invalidates older tokens separately, through `passwordChangedAt`. |
+| **Verification** | A `protect` middleware verifies the token on every protected route, rejects revoked tokens (its `jti` is in `RevokedToken`), loads the user from the database (with `+passwordChangedAt`, without the password), rejects tokens whose user no longer exists, rejects tokens issued before the user's last password change (`changedPasswordAfter`), and attaches the user to `req.user`. `protect` handles authentication failures itself: a missing, invalid, expired, or revoked token, a token whose user no longer exists, or one issued before the last password change, gets a `401` in the standard `{ success: false, message }` shape, sent directly from `protect`. Any other error, such as a database failure, is passed to the central `errorHandler` with `next(err)`, so it is logged and never looks like a bad token. `protect` also attaches the decoded token payload as `req.auth` (logout reads `jti` and `exp` from it). An `authorize('admin')` middleware then checks `req.user.role` on admin routes, and returns `401` if `req.user` is missing, so a route wired without `protect` fails loudly instead of silently. |
+| **Optional auth** | `GET /listings/:id` uses `optionalAuth`, which shares `protect`'s `authenticate()` helper but never rejects. Any token that would fail `protect` (missing, invalid, expired, revoked, issued before a password change, or for a deleted user) is treated as a guest. This lets the controller show a non-available listing only to its owner or an admin, without a stale token blocking a public page. Database errors still go to `errorHandler` with `next(err)`. |
+| **Revocation (logout)** | `POST /auth/logout` stores the token's `jti` and expiry in `RevokedToken`. A TTL index removes each entry once the token would have expired anyway. Trade-off: every protected request makes one extra database read, in exchange for a real server-side logout. Changing the password invalidates older tokens separately, through `passwordChangedAt`. A revoked token is rejected by `protect` everywhere, including on a second logout. |
 | **Authorization ≠ Authentication** | Being logged in isn't enough. Always check ownership (e.g. `listing.userId.equals(req.user._id)`) before editing or deleting. |
 | **Role from DB, not client** | Never accept `role` from the register request body. New users are always `user`. |
 
@@ -804,10 +854,19 @@ const images = uploads.map((u) => u.key);
 
 ### 5.4 Input Validation & Sanitization
 
-- - Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
+- Validate **every** request body, query string, and param with **VineJS** (`@vinejs/vine`). Schemas live in `src/validators/`, one file per resource, and cover length limits, allowed enum values, positive numbers, and valid ObjectIds. Shared error messages are configured once in `src/config/vine.js`.
+
+  | Field | Rule | Why |
+  | --- | --- | --- |
+  | `:id` params | Valid ObjectId (`idParamValidator`, shared by all routes with an id) | Malformed ids return `400` instead of a database cast error |
+  | `images` | 1 to 10 keys, all distinct, each under the owner's prefix | Stops the same photo being attached twice, and other users' files being attached |
+  | `price` | At least 1, at most 2 decimal places | Prices are pesos and centavos, never fractions of a centavo |
+  | `q` | String, max 100 characters | Keeps keyword search bounded |
+  | `rejectionReason` | Required when rejecting, at least 5 characters (model max 500) | Forces a reason the seller can act on |
+
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`): validate that inputs are strings. `sanitizeFilter` is also enabled globally (see 3.6).
-- Validate `images[]` with `ownsKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
+- Validate `images[]` with `hasValidUserKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
 
 
@@ -962,6 +1021,8 @@ app.use(
 | `AWS_REGION` | Lambda | Set by AWS automatically in Lambda (don't set `AWS_ACCESS_KEY_ID`; use the IAM role) |
 | `FRONTEND_URL` | Lambda | `https://ventaph.vercel.app` (used for CORS) |
 | `VITE_API_URL` | Vercel | `https://<api-id>.execute-api.<region>.amazonaws.com/api` |
+| `AWS_PROFILE` | Local `.env` only | Named AWS CLI profile the S3 client uses in local development. Never set on Lambda, which uses the execution role. |
+| `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Local `.env` only | Read by the admin seed script (scripts/seedAdmin.js) only. Not used by the app or set on Lambda. |
 
 #### MongoDB Atlas
 
@@ -1033,6 +1094,7 @@ A short, honest "next steps" list also tells hiring managers you can think beyon
 | **Infrastructure as Code & CI/CD pipeline** | Repeatable, automated deployments. |
 | **Private networking for Atlas (VPC)** | Removes the need for open IP allow-listing. |
 | **Spec filters per category** (e.g. GPU VRAM, RAM capacity) | Richer search; would use a flexible `specs` sub-document. |
+| **Idempotent logout** | A second logout with an already-revoked token would return 200 instead of 401. It needs a variant of protect that skips only the revoked check, plus an upsert on RevokedToken. |
 
 ---
 
