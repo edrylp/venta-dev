@@ -255,3 +255,37 @@ export const getPendingListings = async (req, res, next) => {
     next(err);
   }
 };
+
+export const reviewListing = async (req, res, next) => {
+  try {
+    const { status, rejectionReason } = req.validated.body;
+    const listing = await Listing.findById(req.validated.params.id);
+
+    if (!listing) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Listing not found" 
+      });
+    }
+
+    if (listing.status !== "pending") {
+      return res.status(409).json({ 
+        success: false, 
+        message: "Only pending listings can be reviewed" 
+      });
+    }
+
+    listing.status = status;
+    listing.rejectionReason = listing.status === "rejected" ? rejectionReason : null;
+
+    await listing.save();
+
+    return res.status(200).json({
+      success: true,
+      data: listing,
+    });
+
+  } catch (err) {
+    next(err);
+  }
+};
