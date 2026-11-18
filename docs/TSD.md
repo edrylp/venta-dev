@@ -2,7 +2,7 @@
 
 > **Venta** is a C2C marketplace for used PCs and PC components.
 
-> **Author:** Edryl Palinis · **Version:** 1.1
+> **Author:** Edryl Palinis · **Version:** 1.2
 
 > **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
@@ -22,6 +22,7 @@
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2026-11-18 | Synced with Phase 2: listings API (ownership returns 404, `optionalAuth` on `GET /listings/:id`, `PATCH /listings/:id/sold`, delete behavior and response), auth and middleware (second logout returns 401), S3 (per-key delete, `requestChecksumCalculation`), models, validators and env vars, catch-all 404 handler, `MONGODB_URI` guard in `connectDatabase`, `rejectionReason` default, and mark-sold in the user capabilities and status lifecycle. |
 | 1.1 | 2026-11-12 | Synced with Phase 1: VineJS validation, auth response shape, health routes, `/api` prefix, tests moved to Phase 1, env var clarifications, `protect` vs `errorHandler`, project structure. |
 | 1.0 | 2026-11-08 | Initial final version. |
 
