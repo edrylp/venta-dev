@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Listing from "../models/Listing.js";
 import { hasValidUserKeys, deleteObjects } from "../utils/s3.js";
 
@@ -34,17 +35,28 @@ export const createListing = async (req, res, next) => {
 
 export const getListings = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, category } = req.validated.query;
+    const { q, sort, page = 1, limit = 20, category } = req.validated.query;
     const skip = (page - 1) * limit;
 
     const filter = { status: "available" };
     if (category) {
       filter.category = category;
     }
+    if (q) {
+      filter.$text = mongoose.trusted({ $search: q });
+    }
+
+    const SORTS = {
+      newest: { createdAt: -1, _id: -1 },
+      price_asc: { price: 1, _id: 1 },
+      price_desc: { price: -1, _id: -1 },
+    };
+
+    const sortBy = SORTS[sort] ?? SORTS.newest;
 
     const [listings, total] = await Promise.all([
       Listing.find(filter)
-        .sort({ createdAt: -1, _id: -1 })
+        .sort(sortBy)
         .skip(skip)
         .limit(limit)
         .select("-description -rejectionReason"),
