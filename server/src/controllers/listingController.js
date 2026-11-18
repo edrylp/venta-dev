@@ -135,7 +135,6 @@ export const editListing = async (req, res, next) => {
 
     let removedKeys = [];
     if (updates.images) {
-      updates.images = [...new Set(updates.images)]; // drop duplicates
       if (!hasValidUserKeys(req.user._id, updates.images)) {
         return res.status(400).json({ success: false, message: "Invalid image keys" });
       }
