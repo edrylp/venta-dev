@@ -2,7 +2,7 @@
 
 > **Venta** is a C2C marketplace for used PCs and PC components.
 
-> **Author:** Edryl Palinis · **Version:** 1.2
+> **Author:** Edryl Palinis · **Version:** 1.3
 
 > **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
@@ -22,6 +22,7 @@
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3 | 2026-11-18 | Synced with `GET /listings` search and sort: exact response shape (`pagination` as a sibling of `data`, stated once in the conventions), `_id` tiebreaker on all sorts, query param rules (`q` 1 to 100 characters, empty-string params return `400`, unknown params ignored), `$text` wrapped with `mongoose.trusted()` under `sanitizeFilter` (3.6), and NoSQL injection layers including the Express 5 query parser behavior (5.4). |
 | 1.2 | 2026-11-18 | Synced with Phase 2: listings API (ownership returns 404, `optionalAuth` on `GET /listings/:id`, `PATCH /listings/:id/sold`, delete behavior and response), auth and middleware (second logout returns 401), S3 (per-key delete, `requestChecksumCalculation`), models, validators and env vars, catch-all 404 handler, `MONGODB_URI` guard in `connectDatabase`, `rejectionReason` default, and mark-sold in the user capabilities and status lifecycle. |
 | 1.1 | 2026-11-12 | Synced with Phase 1: VineJS validation, auth response shape, health routes, `/api` prefix, tests moved to Phase 1, env var clarifications, `protect` vs `errorHandler`, project structure. |
 | 1.0 | 2026-11-08 | Initial final version. |
@@ -515,6 +516,8 @@ export default connectDatabase;
 
 > **Where `.env` is loaded:** only in `server.js` (local dev), as its first import (`import "dotenv/config"`), so the variables exist before any other module reads them. This file does not load it. On Lambda, variables come from the function's environment configuration and no `.env` file is deployed. Tests and scripts load their own env: set it in the Vitest config, and import `dotenv/config` at the top of the admin seed script.
 
+> **`sanitizeFilter` and `$text`:** With `sanitizeFilter` on, Mongoose throws `$text is not allowed with sanitizeFilter` for keyword search. `GET /listings` wraps the whole operand object: `filter.$text = mongoose.trusted({ $search: q })`. This is safe because `q` is validated as a plain string by VineJS first. `sanitizeFilter` stays enabled globally for every other query.
+
 ---
 
 ## 4. API Endpoints & Routes (RESTful)
@@ -568,7 +571,7 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/listings` | Public | Get **available** listings. Supports query filters (below). The response includes pagination: { page, limit, total, totalPages }. List items omit description and rejectionReason. |
+| `GET` | `/listings` | Public | Get **available** listings, filtered, sorted and paginated (see query parameters below). Response: `{ "success": true, "data": [ ...listings ], "pagination": { page, limit, total, totalPages } }`, with `pagination` as a sibling of `data`. List items omit `description` and `rejectionReason` and include `imageUrls`. No matches, or a page past the end, returns `200` with `data: []`. |
 | `GET` | `/listings/my-listings` | User | Get the current user's own listings (all statuses). |
 | `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. |
 | `POST` | `/listings` | User | Create a listing with 1 to 10 images (S3 keys from the presign step). Status starts as `pending`. |
@@ -582,10 +585,10 @@ export default connectDatabase;
 
 | Param | Example | Meaning |
 |-------|---------|---------|
-| `category` | `GPU` | Filter by category |
-| `q` | `rtx 3060` | Keyword search (uses the text index) |
-| `sort` | `price_asc`, `price_desc`, `newest` | Sort order (default: `newest`) |
-| `page` / `limit` | `1` / `20` | Pagination (max `limit` = 50) |
+| `category` | `GPU` | Filter by category. Must be one of the 9 categories. |
+| `q` | `rtx 3060` | Keyword search on title and description (text index). |
+| `sort` | `price_asc`, `price_desc`, `newest` | Sort order (default: `newest`). Ties are broken by _id, in the same direction as the primary key, so pagination is stable. |
+| `page` / `limit` | `1` / `20` | Pagination. page is at least 1, limit is 1 to 50 (default 20). |
 
 ### 4.3 Uploads
 
@@ -865,7 +868,10 @@ const images = uploads.map((u) => u.key);
   | `rejectionReason` | Required when rejecting, at least 5 characters (model max 500) | Forces a reason the seller can act on |
 
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
-- Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`): validate that inputs are strings. `sanitizeFilter` is also enabled globally (see 3.6).
+- Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`) in layers:
+  1. **Query parser:** Express 5's default `simple` parser does not build nested objects, so `?q[$gt]=` arrives as a flat key named `q[$gt]`. VineJS drops it as an unknown field and the request behaves like a plain list (`200`). If the parser is ever switched to `extended`, the same request would produce an object and fail layer 2 with a `400`.
+  2. **VineJS:** string types reject non-string values, such as objects and the array from `?q=a&q=b` (`400`).
+  3. **`sanitizeFilter`** is enabled globally (see 3.6). The one deliberate exception is the `$text` operand in `GET /listings`, wrapped with `mongoose.trusted()` after validation.
 - Validate `images[]` with `hasValidUserKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
 
