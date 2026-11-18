@@ -4,9 +4,6 @@ import RevokedToken from "../models/RevokedToken.js";
 
 const fail = (message) => ({ ok: false, message });
 
-const unauthorized = (res, message) =>
-  res.status(401).json({ success: false, message });
-
 const authenticate = async (req) => {
   const authHeader = req.headers.authorization;
 
