@@ -239,3 +239,19 @@ export const markListingAsSold = async (req, res, next) => {
     next(err);
   }
 };
+
+// For Admin
+export const getPendingListings = async (req, res, next) => {
+  try {
+    const listings = await Listing.find({ status: "pending" })
+      .sort({ updatedAt: 1, _id: 1 })
+      .populate("userId", "username");
+
+    return res.status(200).json({
+      success: true,
+      data: listings,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
