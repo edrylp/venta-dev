@@ -29,5 +29,6 @@ vine.messagesProvider = new SimpleMessagesProvider(
         currentPassword: "current password",
         newPassword: "new password",
         files: "photos",
+        rejectionReason: "rejection reason"
     },
 )
