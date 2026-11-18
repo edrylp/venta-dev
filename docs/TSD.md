@@ -474,6 +474,10 @@ mongoose.set('sanitizeFilter', true);
 const connectDatabase = async () => {
   if (cached.conn) {return cached.conn;}
 
+  if (!process.env.MONGODB_URI) {
+    throw new Error("MONGODB_URI is not defined");
+  }
+
   if (!cached.promise) {
     cached.promise = mongoose
       .connect(process.env.MONGODB_URI, {
