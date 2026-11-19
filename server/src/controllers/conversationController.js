@@ -3,7 +3,7 @@ import Conversation from "../models/Conversation.js";
 
 export const createConversation = async (req, res, next) => {
   try {
-    const listingId = req.validated.params.id;
+    const listingId = req.validated.params.listingId;
     const listing = await Listing.findById(listingId);
 
     if (!listing) {
