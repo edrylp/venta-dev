@@ -8,6 +8,7 @@ import authorize from "./middleware/authorize.js";
 import uploadRoutes from "./routes/uploadRoutes.js";
 import listingRoutes from "./routes/listingRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import conversationRoutes from "./routes/conversationRoutes.js";
 
 const app = express();
 
@@ -45,6 +46,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/listings", listingRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/conversations", conversationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "Route not found" });
