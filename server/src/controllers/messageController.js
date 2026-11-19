@@ -48,3 +48,35 @@ export const sendMessage = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getMessages = async (req, res, next) => {
+  try {
+    const { conversationId } = req.validated.params;
+    const conversation = await Conversation.findById(conversationId);
+    const userId = req.user._id;
+
+    const isParticipant =
+      conversation &&
+      (userId.equals(conversation.buyerId) ||
+        userId.equals(conversation.sellerId));
+
+    if (!isParticipant) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      });
+    }
+
+    const messages = await Message.find({ conversationId }).sort({
+      createdAt: 1,
+      _id: 1,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: messages,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
