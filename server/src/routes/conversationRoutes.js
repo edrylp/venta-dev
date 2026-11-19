@@ -5,11 +5,11 @@ import { listingIdParamValidator } from "../validators/commonValidators.js";
 import { createConversation } from "../controllers/conversationController.js";
 
 const router = express.Router();
+router.use(protect);
 
 // Create Conversation
 router.post(
   "/:listingId",
-  protect,
   validate(listingIdParamValidator, "params"),
   createConversation,
 );
