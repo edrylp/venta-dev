@@ -1,16 +1,16 @@
 import express from "express";
 import protect from "../middleware/protect.js";
 import validate from "../middleware/validate.js";
-import { idParamValidator } from "../validators/commonValidators.js";
+import { listingIdParamValidator } from "../validators/commonValidators.js";
 import { createConversation } from "../controllers/conversationController.js";
 
 const router = express.Router();
 
 // Create Conversation
 router.post(
-  "/:id",
+  "/:listingId",
   protect,
-  validate(idParamValidator, "params"),
+  validate(listingIdParamValidator, "params"),
   createConversation,
 );
 
