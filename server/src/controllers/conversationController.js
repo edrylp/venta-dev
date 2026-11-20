@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Listing from "../models/Listing.js";
 import Conversation from "../models/Conversation.js";
 
@@ -60,6 +61,57 @@ export const createConversation = async (req, res, next) => {
       }
       throw err;
     }
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getConversations = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+
+    const conversations = await Conversation.find({
+      $or: [{ buyerId: userId }, { sellerId: userId }],
+      lastMessageAt: mongoose.trusted({ $ne: null }), // this is to hide conversations with no messages yet
+    })
+      .sort({ lastMessageAt: -1, _id: -1 })
+      .populate("listingId", "title status")
+      .populate("buyerId sellerId", "username")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: conversations,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getConversation = async (req, res, next) => {
+  try {
+    const conversationId = req.validated.params.conversationId;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      $or: [{ buyerId: userId }, { sellerId: userId }],
+    })
+      .populate("listingId", "title status price")
+      .populate("buyerId sellerId", "username")
+      .lean();
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: conversation,
+    });
   } catch (err) {
     next(err);
   }
