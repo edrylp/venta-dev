@@ -7,6 +7,7 @@ export default defineConfig({
       JWT_EXPIRES_IN: "1d",
       S3_PUBLIC_BASE_URL: "https://cdn.example.test",
     },
+    setupFiles: ["./tests/setup.js"],
     testTimeout: 15000,
     hookTimeout: 60000, 
   },

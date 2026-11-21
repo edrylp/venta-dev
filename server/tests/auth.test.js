@@ -1,10 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import request from "supertest";
-import { MongoMemoryServer } from "mongodb-memory-server";
-import mongoose, { mongo } from "mongoose";
 import app from "../src/app.js";
-import connectDatabase from "../src/config/database.js";
-import User from "../src/models/User.js";
+import { bearer, sleep, registerUser, makeAdmin } from "./helpers.js";
 
 // Routes
 const LOGIN_ROUTE = "/api/auth/login";
@@ -12,46 +9,6 @@ const PASSWORD_ROUTE = "/api/auth/password";
 const LOGOUT_ROUTE = "/api/auth/logout";
 const PROTECTED_ROUTE = "/api/listings/my-listings";
 const ADMIN_ROUTE = "/api/admin/listings";
-const PASSWORD = "ventauser2026";
-
-let mongoServer;
-let counter = 0;
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const bearer = (token) => `Bearer ${token}`;
-
-const uniqueUser = () => {
-  const username = `user_${++counter}_${Math.random().toString(36).slice(2, 6)}`;
-  return { username, email: `${username}@venta.com`, password: PASSWORD };
-};
-
-const registerUser = async () => {
-  const creds = uniqueUser();
-  const res = await request(app).post("/api/auth/register").send(creds);
-  expect(res.status).toBe(201);
-  return { ...creds, token: res.body.data.token };
-};
-
-const makeAdminToken = async () => {
-  const creds = uniqueUser();
-  await User.create({ ...creds, role: "admin" });
-  const res = await request(app)
-    .post(LOGIN_ROUTE)
-    .send({ email: creds.email, password: creds.password });
-  expect(res.status).toBe(200);
-  return { token: res.body.data.token };
-};
-
-beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongoServer.getUri();
-  await connectDatabase();
-});
-
-afterAll(async () => {
-  await mongoose.disconnect();
-  await mongoServer.stop();
-});
 
 describe("Auth Routes", () => {
   it("register and login return tokens that work on the protected route", async () => {
@@ -141,6 +98,7 @@ describe("Auth Routes", () => {
     expect(res.status).toBe(401);
   });
 
+  // ADMIN Checks
   it("returns 403 for a normal user on the admin route", async () => {
     const { token } = await registerUser();
 
@@ -151,7 +109,7 @@ describe("Auth Routes", () => {
   });
 
   it("returns 200 for an admin user on the admin route", async () => {
-    const { token } = await makeAdminToken();
+    const { token } = await makeAdmin();
 
     const adminCheck = await request(app)
       .get(ADMIN_ROUTE)
