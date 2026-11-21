@@ -122,6 +122,25 @@ describe("Auth Routes", () => {
     expect(freshCheck.status).toBe(200);
   });
 
+  it("no token gives 401", async () => {
+    const res = await request(app).get(PROTECTED_ROUTE);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when the token is malformed", async () => {
+    const res = await request(app)
+      .get(PROTECTED_ROUTE)
+      .set("Authorization", "Bearer not-a-real-token");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when the Authorization header is not a Bearer token", async () => {
+    const res = await request(app)
+      .get(PROTECTED_ROUTE)
+      .set("Authorization", "abc123");
+    expect(res.status).toBe(401);
+  });
+
   it("returns 403 for a normal user on the admin route", async () => {
     const { token } = await registerUser();
 
