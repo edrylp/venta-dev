@@ -3,6 +3,8 @@ import { expect } from "vitest";
 import app from "../src/app.js";
 import User from "../src/models/User.js";
 import Listing from "../src/models/Listing.js";
+import Conversation from "../src/models/Conversation.js";
+import Message from "../src/models/Message.js";
 
 export const PASSWORD = "ventauser2026";
 let counter = 0;
@@ -46,3 +48,23 @@ export const createListing = (ownerId, overrides = {}) =>
     status: "available",
     ...overrides,
   });
+
+export const createConversation = (listing, buyerId) =>
+  Conversation.create({
+    listingId: listing._id,
+    buyerId,
+    sellerId: listing.userId,
+  });
+
+export const createMessage = async (
+  conversationId,
+  senderId,
+  content = "Is this still available?",
+) => {
+  const message = await Message.create({ conversationId, senderId, content });
+  await Conversation.updateOne(
+    { _id: conversationId },
+    { lastMessage: content, lastMessageAt: message.createdAt },
+  );
+  return message;
+};
