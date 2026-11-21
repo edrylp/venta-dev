@@ -10,8 +10,8 @@ import User from "../src/models/User.js";
 const LOGIN_ROUTE = "/api/auth/login";
 const PASSWORD_ROUTE = "/api/auth/password";
 const LOGOUT_ROUTE = "/api/auth/logout";
-const PROTECTED_ROUTE = "/api/health/protected";
-const ADMIN_ROUTE = "/api/health/admin";
+const PROTECTED_ROUTE = "/api/listings/my-listings";
+const ADMIN_ROUTE = "/api/admin/listings";
 const PASSWORD = "ventauser2026";
 
 let mongoServer;
@@ -120,6 +120,25 @@ describe("Auth Routes", () => {
       .get(PROTECTED_ROUTE)
       .set("Authorization", bearer(freshToken));
     expect(freshCheck.status).toBe(200);
+  });
+
+  it("no token gives 401", async () => {
+    const res = await request(app).get(PROTECTED_ROUTE);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when the token is malformed", async () => {
+    const res = await request(app)
+      .get(PROTECTED_ROUTE)
+      .set("Authorization", "Bearer not-a-real-token");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when the Authorization header is not a Bearer token", async () => {
+    const res = await request(app)
+      .get(PROTECTED_ROUTE)
+      .set("Authorization", "abc123");
+    expect(res.status).toBe(401);
   });
 
   it("returns 403 for a normal user on the admin route", async () => {
