@@ -10,8 +10,8 @@ import User from "../src/models/User.js";
 const LOGIN_ROUTE = "/api/auth/login";
 const PASSWORD_ROUTE = "/api/auth/password";
 const LOGOUT_ROUTE = "/api/auth/logout";
-const PROTECTED_ROUTE = "/api/health/protected";
-const ADMIN_ROUTE = "/api/health/admin";
+const PROTECTED_ROUTE = "/api/listings/my-listings";
+const ADMIN_ROUTE = "/api/admin/listings";
 const PASSWORD = "ventauser2026";
 
 let mongoServer;
