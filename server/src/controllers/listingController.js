@@ -59,7 +59,8 @@ export const getListings = async (req, res, next) => {
         .sort(sortBy)
         .skip(skip)
         .limit(limit)
-        .select("-description -rejectionReason"),
+        .select("-description -rejectionReason")
+        .populate("userId", "username"),
       Listing.countDocuments(filter),
     ]);
 
