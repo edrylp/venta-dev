@@ -27,7 +27,7 @@ const conversationSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 // One conversation per buyer per listing

@@ -59,7 +59,8 @@ export const getListings = async (req, res, next) => {
         .sort(sortBy)
         .skip(skip)
         .limit(limit)
-        .select("-description -rejectionReason"),
+        .select("-description -rejectionReason")
+        .populate("userId", "username"),
       Listing.countDocuments(filter),
     ]);
 
@@ -77,6 +78,7 @@ export const getMyListings = async (req, res, next) => {
   try {
     const listings = await Listing.find({ userId: req.user._id }).sort({
       createdAt: -1,
+       _id: -1
     });
 
     return res.status(200).json({
