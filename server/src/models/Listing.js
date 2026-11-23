@@ -70,7 +70,7 @@ const listingSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true, toJSON: { virtuals: true }, id: false },
+  { timestamps: true, toJSON: { virtuals: true, versionKey: false }, id: false },
 );
 
 // Seller's listings, newest first

@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 userSchema.pre("save", async function () {

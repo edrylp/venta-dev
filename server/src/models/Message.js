@@ -20,7 +20,7 @@ const messageSchema = new mongoose.Schema(
       maxlength: [1000, "Message cannot exceed 1000 characters"],
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 messageSchema.index({ conversationId: 1, createdAt: -1 });
