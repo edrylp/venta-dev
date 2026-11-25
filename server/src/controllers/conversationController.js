@@ -75,6 +75,7 @@ export const getConversations = async (req, res, next) => {
       lastMessageAt: mongoose.trusted({ $ne: null }), // this is to hide conversations with no messages yet
     })
       .sort({ lastMessageAt: -1, _id: -1 })
+      .select("-__v")
       .populate("listingId", "title status")
       .populate("buyerId sellerId", "username")
       .lean();
@@ -97,6 +98,7 @@ export const getConversation = async (req, res, next) => {
       _id: conversationId,
       $or: [{ buyerId: userId }, { sellerId: userId }],
     })
+      .select("-__v")
       .populate("listingId", "title status price")
       .populate("buyerId sellerId", "username")
       .lean();
