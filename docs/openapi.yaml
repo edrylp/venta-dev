@@ -1,0 +1,2315 @@
+openapi: 3.0.3
+info:
+  title: Venta API
+  version: 1.0.0
+  description: |-
+    REST API for **Venta**, a C2C marketplace for used PC components in the Philippines. Every listing has a hardware category, a price in PHP, a location and 1 to 10 photos, and goes live only after an admin approves it. Buyers and sellers contact each other through one conversation per listing.
+
+    ### Authentication
+
+    Log in or register to get a JWT, then send it as `Authorization: Bearer <token>`. Logging out revokes the token server-side, and changing the password invalidates all older tokens. There are two roles, `user` (can both buy and sell) and `admin` (seeded, never self-registered). A user's email is never shown to other users.
+
+    ### Conventions
+
+    - Success: `{ "success": true, "data": ... }`. List endpoints that paginate add a sibling `pagination` object.
+    - Error: `{ "success": false, "message": "..." }`.
+    - Photos are uploaded straight to S3 with pre-signed URLs, so image bytes never pass through this API.
+    - Ids are 24-character hex ObjectIds. Timestamps are ISO 8601.
+
+    ### Listing lifecycle
+
+    | Status | Public? | Next |
+    | --- | --- | --- |
+    | `pending` | No | `available` or `rejected` (admin) |
+    | `available` | Yes | `sold`, or back to `pending` if edited |
+    | `rejected` | No | back to `pending` when the seller edits |
+    | `sold` | No (owner and admin only) | final |
+
+    Listings that are not `available` return `404` to everyone except their owner and admins.
+servers:
+- url: http://localhost:5000/api
+  description: Local development
+- url: https://{apiId}.execute-api.{region}.amazonaws.com/api
+  description: AWS API Gateway (Lambda)
+  variables:
+    apiId:
+      default: your-api-id
+    region:
+      default: ap-southeast-1
+tags:
+- name: Health
+  description: Confirms the API is running.
+- name: Auth
+  description: Register, log in, change password and log out.
+- name: Uploads
+  description: Pre-signed S3 URLs for listing photos.
+- name: Listings
+  description: Browse, create, edit, mark sold and delete listings.
+- name: Admin
+  description: Review the pending queue. Admin only.
+- name: Conversations
+  description: Buyer-seller messaging about a listing.
+security:
+- bearerAuth: []
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      operationId: getHealth
+      summary: Health check
+      description: Confirms the API is running.
+      security: []
+      responses:
+        '200':
+          description: The server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+              example:
+                success: true
+                data:
+                  status: ok
+  /auth/register:
+    post:
+      tags:
+      - Auth
+      operationId: register
+      summary: Register
+      description: |-
+        Creates an account. The role is always `user`; it cannot be set by the client. Returns the new user and a JWT.
+
+        Registration tells the caller when an email or username is already taken (an accepted trade-off, because the user needs to know).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              username: ventauser
+              email: ventauser@example.com
+              password: password1234
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/AuthResult'
+              example:
+                success: true
+                data:
+                  user:
+                    _id: 665f1c2a9b1e4d0012a3b4a2
+                    username: ventauser
+                    email: ventauser@example.com
+                    role: user
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example-payload.example-signature
+        '400':
+          description: Validation failed. Non-string values are rejected too (for example an object or array in place of a string).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                usernameTooShort:
+                  summary: Username too short
+                  value:
+                    success: false
+                    message: Username must be at least 4 characters
+                usernameTooLong:
+                  summary: Username too long
+                  value:
+                    success: false
+                    message: The username field must not be greater than 15 characters
+                usernameNotString:
+                  summary: Non-string username
+                  value:
+                    success: false
+                    message: The username field must be a string
+                passwordNotString:
+                  summary: Non-string password
+                  value:
+                    success: false
+                    message: The password field must be a string
+        '409':
+          description: Email or username already taken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                duplicateEmail:
+                  summary: Duplicate email
+                  value:
+                    success: false
+                    message: Email already registered.
+                duplicateUsername:
+                  summary: Duplicate username
+                  value:
+                    success: false
+                    message: Username has already been taken.
+  /auth/login:
+    post:
+      tags:
+      - Auth
+      operationId: login
+      summary: Log in
+      description: |-
+        Logs in with email and password and returns the user and a JWT.
+
+        An unknown email and a wrong password return the same `401` message, so the API does not reveal which emails are registered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: ventauser@example.com
+              password: password1234
+      responses:
+        '200':
+          description: Logged in.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/AuthResult'
+              example:
+                success: true
+                data:
+                  user:
+                    _id: 665f1c2a9b1e4d0012a3b4a2
+                    username: ventauser
+                    email: ventauser@example.com
+                    role: user
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example-payload.example-signature
+        '400':
+          description: Non-string `email` or `password`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                emailNotString:
+                  summary: Non-string email
+                  value:
+                    success: false
+                    message: The email field must be a string
+                passwordNotString:
+                  summary: Non-string password
+                  value:
+                    success: false
+                    message: The password field must be a string
+        '401':
+          description: Wrong password or unknown email (same message for both).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Invalid email or password
+  /auth/password:
+    patch:
+      tags:
+      - Auth
+      operationId: changePassword
+      summary: Change password
+      description: |-
+        Changes the password of the logged-in user and returns a fresh token.
+
+        ### Response
+
+        `200` with `data.user` and a new `data.token`, so the current session continues.
+
+        ### Errors
+
+        | Status | When |
+        | --- | --- |
+        | `400` | Wrong `currentPassword` (deliberately not `401`, so the frontend's 401 handler does not log the user out) |
+        | `400` | `newPassword` shorter than 8, longer than 72, or equal to `currentPassword` |
+        | `401` | Missing, invalid or revoked token |
+
+        ### How old tokens stop working
+
+        The server records `passwordChangedAt`. Any token issued before that moment is rejected with `401` ("Password recently changed"). This is separate from logout, which revokes a single token through the `RevokedToken` collection.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+            example:
+              currentPassword: password1234
+              newPassword: newpassword1234
+      responses:
+        '200':
+          description: Password changed. A fresh token is returned so the current session continues.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/AuthResult'
+              example:
+                success: true
+                data:
+                  user:
+                    _id: 665f1c2a9b1e4d0012a3b4a2
+                    username: ventauser
+                    email: ventauser@example.com
+                    role: user
+                  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example-payload.example-signature
+        '400':
+          description: Validation failed, or `currentPassword` is wrong. (A wrong current password is deliberately `400`, not `401`, so the frontend does not log the user out.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                tooShort:
+                  summary: New password too short
+                  value:
+                    success: false
+                    message: New password must be at least 8 characters
+                tooLong:
+                  summary: New password too long
+                  value:
+                    success: false
+                    message: New password cannot exceed 72 characters
+                samePassword:
+                  summary: Same as current password
+                  value:
+                    success: false
+                    message: New password cannot be the same as the current password
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/logout:
+    post:
+      tags:
+      - Auth
+      operationId: logout
+      summary: Log out
+      description: |-
+        Logs out the current user by revoking the token used for this request.
+
+        ### Response
+
+        `200` with `data.message`. The token's `jti` and expiry are stored in the `RevokedToken` collection, and the token stops working immediately.
+
+        ### Notes
+        - A revoked token returns `401` ("This token has been revoked") on every protected route. That includes a second logout with the same token (logout is not idempotent by design).
+        - A token issued before a password change returns a different `401` ("Password recently changed").
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Token revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: object
+                    required:
+                    - message
+                    properties:
+                      message:
+                        type: string
+              example:
+                success: true
+                data:
+                  message: Logged out successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /uploads/presign:
+    post:
+      tags:
+      - Uploads
+      operationId: presignUploads
+      summary: Get pre-signed upload URLs
+      description: |-
+        Generates pre-signed S3 upload URLs, so photos go straight from the browser to S3 and AWS credentials never reach the client.
+
+        ### Upload flow
+
+        1. Call this endpoint with each file's content type and size (1 to 10 files, JPEG, PNG or WebP, at most 5 MB each).
+        2. `PUT` each file to its `uploadUrl` (this goes to S3, not to this API). The `Content-Type` header and the file size must match what you declared, because both are signed. Otherwise S3 rejects the upload with `403`.
+        3. Submit the returned `key` values when creating or editing a listing.
+
+        ### Notes
+
+        - The server chooses the key, under your own `listings/<userId>/` prefix. URLs expire after 5 minutes.
+        - The size limit is enforced three ways: the browser checks first, this endpoint rejects any declared size over 5 MB, and S3 rejects an upload whose size differs from the signed one.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignRequest'
+            example:
+              files:
+              - contentType: image/jpeg
+                size: 482113
+              - contentType: image/webp
+                size: 215004
+      responses:
+        '200':
+          description: One entry per file, in the same order as the request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PresignedUpload'
+              example:
+                success: true
+                data:
+                - key: listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  uploadUrl: https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=<access-key-id>%2F<date>%2Fap-southeast-1%2Fs3%2Faws4_request&X-Amz-Date=<timestamp>&X-Amz-Expires=300&X-Amz-Signature=<signature>&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost&x-id=PutObject
+        '400':
+          description: Invalid type, no files, more than 10 files, or a file over 5 MB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidType:
+                  summary: Invalid file type
+                  value:
+                    success: false
+                    message: Only JPEG, PNG, or WebP photos are allowed
+                tooMany:
+                  summary: More than 10 photos
+                  value:
+                    success: false
+                    message: You can upload at most 10 photos
+                noFiles:
+                  summary: No photos
+                  value:
+                    success: false
+                    message: Please add at least 1 photo
+                tooLarge:
+                  summary: File over 5 MB
+                  value:
+                    success: false
+                    message: Each photo must be 5 MB or smaller
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /listings:
+    get:
+      tags:
+      - Listings
+      operationId: browseListings
+      summary: Browse listings
+      description: |-
+        Returns the public listings (only `available`), filtered, sorted and paginated.
+
+        ### Response
+
+        `200` with `data` (array of listings) and a sibling `pagination` object: `{ page, limit, total, totalPages }`. Each item has `_id`, `userId` (populated as `{ _id, username }`), `category`, `title`, `price`, `location`, `images`, `imageUrls`, `status` and timestamps. List items omit `description` and `rejectionReason`.
+
+        No matches, or a page past the end, returns `200` with `data: []`.
+
+        ### Notes
+        - Unknown query parameters are ignored. This includes `q[$gt]`, which arrives as a flat unknown key and is dropped.
+        - Invalid `category`, out-of-range `page` or `limit`, empty-string parameters, or a non-string `q` return `400`.
+        - The seller's email is never returned.
+      security: []
+      parameters:
+      - name: category
+        in: query
+        schema:
+          $ref: '#/components/schemas/Category'
+        description: Filter by category.
+      - name: q
+        in: query
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description: Keyword search on title and description.
+        example: rtx 3060
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - newest
+          - price_asc
+          - price_desc
+          default: newest
+        description: Sort order. Ties are broken by `_id`, so paging is stable.
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      responses:
+        '200':
+          description: Available listings. `pagination` is a sibling of `data`. No matches, or a page past the end, returns an empty `data` array.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                - pagination
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ListingSummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+              example:
+                success: true
+                data:
+                - _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: GPU
+                  title: ASUS GeForce RTX 4070 Ti 12GB STRIX OC
+                  price: 40000
+                  location: Makati City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: available
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  userId:
+                    _id: 665f1c2a9b1e4d0012a3b4a1
+                    username: ventaseller
+                - _id: 665f1c2a9b1e4d0012a3b4c6
+                  category: Processor
+                  title: Ryzen 5 7600X
+                  price: 8500
+                  location: Pasig City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: available
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  userId:
+                    _id: 665f1c2a9b1e4d0012a3b4a1
+                    username: ventaseller
+                pagination:
+                  page: 1
+                  limit: 20
+                  total: 21
+                  totalPages: 2
+        '400':
+          description: Invalid query parameter (category, page, limit, or a non-string `q`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidCategory:
+                  summary: Invalid category
+                  value:
+                    success: false
+                    message: The selected category is invalid
+                limitTooBig:
+                  summary: Limit out of range
+                  value:
+                    success: false
+                    message: The limit field must not be greater than 50
+    post:
+      tags:
+      - Listings
+      operationId: createListing
+      summary: Create a listing
+      description: |-
+        Creates a listing. It always starts as `pending` and is not public until an admin approves it.
+
+        ### Response
+
+        `201` with the new listing (`status: "pending"`, `rejectionReason: null`) and `imageUrls` built from the stored keys.
+
+        ### Notes
+        - Only the documented fields are used. `status`, `role` and any other extra field are dropped, so a client cannot set its own status.
+        - Validation failures return `400`. A missing or invalid token returns `401`.
+        - The server checks that keys are inside your prefix, not that the object actually exists in S3 (known limitation).
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListingCreate'
+            example:
+              category: Processor
+              title: Intel Core Ultra 5 250K Plus
+              price: 12500
+              description: Almost brand new; used for only a month. No issues.
+              location: Makati City
+              images:
+              - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+      responses:
+        '201':
+          description: Created. The listing starts as `pending`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/Listing'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: Processor
+                  title: Intel Core Ultra 5 250K Plus
+                  price: 12500
+                  location: Makati City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: pending
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: Almost brand new; used for only a month. No issues.
+                  rejectionReason: null
+                  userId: 665f1c2a9b1e4d0012a3b4a1
+        '400':
+          description: Validation failed, or an image key is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                descriptionTooShort:
+                  summary: Description too short
+                  value:
+                    success: false
+                    message: The description field must have at least 10 characters
+                priceTooLow:
+                  summary: Price below 1
+                  value:
+                    success: false
+                    message: The price field must be at least 1
+                noImages:
+                  summary: No images
+                  value:
+                    success: false
+                    message: The images field must have at least 1 items
+                invalidKeys:
+                  summary: Key outside your prefix
+                  value:
+                    success: false
+                    message: Invalid image keys
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /listings/my-listings:
+    get:
+      tags:
+      - Listings
+      operationId: getMyListings
+      summary: List my listings
+      description: |-
+        Returns all of the logged-in user's own listings in every status, newest first (an empty array if none).
+
+        Rejected listings include the admin's `rejectionReason`. `userId` is the owner's id only, and `imageUrls` are public URLs built from the stored keys (not pre-signed).
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: The caller's own listings in every status, newest first. Empty array if none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Listing'
+              example:
+                success: true
+                data:
+                - _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: GPU
+                  title: ASUS GeForce RTX 4070 Ti 12GB STRIX OC
+                  price: 40000
+                  location: Makati City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: rejected
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: Almost brand new, used for only a month. No issues.
+                  rejectionReason: Photos are too blurry, please retake them.
+                  userId: 665f1c2a9b1e4d0012a3b4a1
+                - _id: 665f1c2a9b1e4d0012a3b4c6
+                  category: Processor
+                  title: Ryzen 5 7600X
+                  price: 8500
+                  location: Pasig City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: available
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: Almost brand new, used for only a month. No issues.
+                  rejectionReason: null
+                  userId: 665f1c2a9b1e4d0012a3b4a1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /listings/{id}:
+    get:
+      tags:
+      - Listings
+      operationId: getListing
+      summary: Get a listing
+      description: |-
+        Returns one listing by ID. Authentication is optional.
+
+        ### Response
+
+        `200` with the full listing: `userId` (populated as `{ _id, username }`), `category`, `title`, `price`, `description`, `location`, `images`, `imageUrls`, `status`, `rejectionReason` and timestamps.
+
+        ### Visibility Rules
+
+        | Listing status | Who can open it | Everyone else |
+        | --- | --- | --- |
+        | `available` | Anyone, including guests | n/a |
+        | `pending`, `rejected`, `sold` | The owner and admins | `404` |
+
+        ### Notes
+        - Non-owners get `404`, not `403`, so listing IDs and their state do not leak.
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/ListingId'
+      responses:
+        '200':
+          description: The listing, with the seller populated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/ListingDetail'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: GPU
+                  title: ASUS GeForce RTX 4070 Ti 12GB STRIX OC
+                  price: 40000
+                  location: Makati City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: available
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: Almost brand new, used for only a month. No issues.
+                  rejectionReason: null
+                  userId:
+                    _id: 665f1c2a9b1e4d0012a3b4a1
+                    username: ventaseller
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: The id field format is invalid
+        '404':
+          description: Listing not found, or not visible to the caller (non-available listings are visible only to the owner and admins).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not found
+    patch:
+      tags:
+      - Listings
+      operationId: editListing
+      summary: Edit my listing
+      description: |-
+        Updates the content of the owner's own listing.
+
+        ### Status after editing
+
+        | Current status | Result |
+        | --- | --- |
+        | `available` | Goes back to `pending` for re-review |
+        | `rejected` | Goes back to `pending`, and `rejectionReason` is cleared |
+        | `pending` | Stays `pending` |
+        | `sold` | `409`. A sold listing cannot be edited |
+
+        `status` and `rejectionReason` are ignored if sent. Only an admin decision, or the seller editing the listing, changes them.
+
+        ### Response
+
+        `200` with the updated listing.
+
+        ### Notes
+        - A listing that is missing or not yours returns `404` (the same response, so IDs do not leak). Admins cannot edit listings.
+        - Invalid fields or invalid image keys return `400`. A missing token returns `401`.
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/ListingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListingUpdate'
+            examples:
+              partial:
+                summary: Change some fields
+                value:
+                  title: Ryzen 5 7600X (Boxed)
+                  price: 8500
+              replacePhotos:
+                summary: Replace the photos (send the full list)
+                value:
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  - listings/665f1c2a9b1e4d0012a3b4a1/9a1d4c70-5b3e-4e28-8f6a-1c2d3e4f5a6b.webp
+      responses:
+        '200':
+          description: Updated. An `available` or `rejected` listing returns to `pending`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/Listing'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: Processor
+                  title: Ryzen 5 7600X (Boxed)
+                  price: 8500
+                  location: Pasig City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: pending
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: Almost brand new, used for only a month. No issues.
+                  rejectionReason: null
+                  userId: 665f1c2a9b1e4d0012a3b4a1
+        '400':
+          description: Empty body, validation failure, invalid image keys, or malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                priceTooLow:
+                  summary: Validation error
+                  value:
+                    success: false
+                    message: The price field must be at least 1
+                invalidKeys:
+                  summary: Invalid images
+                  value:
+                    success: false
+                    message: Invalid image keys
+                invalidId:
+                  summary: Malformed id
+                  value:
+                    success: false
+                    message: The id field format is invalid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Listing missing, or not yours (same response so ids do not leak). Admins cannot edit listings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not found
+        '409':
+          description: A sold listing cannot be edited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: A sold listing can't be updated
+    delete:
+      tags:
+      - Listings
+      operationId: deleteListing
+      summary: Delete a listing
+      description: |-
+        Permanently deletes a listing. The owner can delete their own listing, and an admin can delete any listing.
+
+        ### Response
+
+        `200` with `{ "success": true, "data": { "message": "Successfully deleted" } }`.
+
+        ### What happens
+
+        1. The listing is deleted from the database.
+
+        2. Its photos are then deleted from S3. This is best-effort: a failure is logged and does not fail the request, so an orphaned S3 object is possible (an accepted MVP trade-off).
+
+        3. Its conversations and messages are **kept**. They stay readable, the listing shows as `null`, and the UI shows "Listing no longer available". Sending in those conversations returns `409`.
+
+        ### Notes
+        - A listing that is missing or belongs to someone else returns `404` (the same response, so IDs do not leak). Admins are the exception and can delete any listing.
+        - A missing token returns `401`.
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/ListingId'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: object
+                    required:
+                    - message
+                    properties:
+                      message:
+                        type: string
+              example:
+                success: true
+                data:
+                  message: Successfully deleted
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: The id field format is invalid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Listing missing, or not yours (admins can delete any listing).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not found
+  /listings/{id}/sold:
+    patch:
+      tags:
+      - Listings
+      operationId: markListingSold
+      summary: Mark my listing as sold
+      description: |-
+        Marks the owner's `available` listing as sold. `sold` is final: the listing can no longer be edited or reverted.
+
+        Returns a confirmation message only, not the listing. No request body.
+
+        ### Notes
+
+        - A sold listing disappears from public browse and stays visible to its owner and admins.
+        - Its conversations stay readable, but sending messages in them is blocked.
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/ListingId'
+      responses:
+        '200':
+          description: Marked as sold. Returns a message only, not the listing.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: object
+                    required:
+                    - message
+                    properties:
+                      message:
+                        type: string
+              example:
+                success: true
+                data:
+                  message: Listing marked as sold
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: The id field format is invalid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Listing missing, or not yours. Admins also get `404` because they cannot mark listings sold.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not found
+        '409':
+          description: Only an `available` listing can be marked sold.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Only available listings can be marked as sold
+  /admin/listings:
+    get:
+      tags:
+      - Admin
+      operationId: adminListPending
+      summary: List pending listings
+      description: 'Returns the review queue: listings with status `pending`, with the seller populated. Admin only.'
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Pending listings (empty array if none).
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ListingDetail'
+              example:
+                success: true
+                data:
+                - _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: Processor
+                  title: Intel Core i9 14900K
+                  price: 22999
+                  location: Pasig City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: pending
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: No box, no issues. Can give 7 days personal warranty.
+                  rejectionReason: null
+                  userId:
+                    _id: 665f1c2a9b1e4d0012a3b4a1
+                    username: ventaseller
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/listings/{id}/status:
+    patch:
+      tags:
+      - Admin
+      operationId: adminReviewListing
+      summary: Approve or reject a listing
+      description: |-
+        Approves (`available`) or rejects (`rejected`) a **pending** listing. Admin only.
+
+        - A rejection needs a `rejectionReason` of at least 5 characters. The seller sees it, and it is cleared when they resubmit.
+        - Only `pending` listings can be reviewed. Any other status returns `409`.
+        - Any `status` other than `available` or `rejected` returns `400`.
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/ListingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+            examples:
+              approve:
+                summary: Approve
+                value:
+                  status: available
+              reject:
+                summary: Reject with a reason
+                value:
+                  status: rejected
+                  rejectionReason: Photos are too blurry, please retake them.
+      responses:
+        '200':
+          description: Reviewed. Returns the updated listing.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/Listing'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4c5
+                  category: GPU
+                  title: ASUS GeForce RTX 4070 Ti 12GB STRIX OC
+                  price: 40000
+                  location: Makati City
+                  images:
+                  - listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  imageUrls:
+                  - https://venta-uploads.s3.ap-southeast-1.amazonaws.com/listings/665f1c2a9b1e4d0012a3b4a1/3f6c1b9e-8a42-4d17-9c55-2b7e0a1d6f34.jpg
+                  status: available
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T07:20:31.203Z'
+                  description: Almost brand new, used for only a month. No issues.
+                  rejectionReason: null
+                  userId: 665f1c2a9b1e4d0012a3b4a1
+        '400':
+          description: Malformed id, invalid status, or a missing/short rejection reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidId:
+                  summary: Malformed id
+                  value:
+                    success: false
+                    message: The id field format is invalid
+                invalidStatus:
+                  summary: Invalid status
+                  value:
+                    success: false
+                    message: The selected status is invalid
+                reasonRequired:
+                  summary: Rejection without reason
+                  value:
+                    success: false
+                    message: The rejection reason field is required
+                reasonTooShort:
+                  summary: Reason too short
+                  value:
+                    success: false
+                    message: The rejection reason field must have at least 5 characters
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Listing not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not found
+        '409':
+          description: The listing is not pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Only pending listings can be reviewed
+  /conversations:
+    get:
+      tags:
+      - Conversations
+      operationId: listConversations
+      summary: List my conversations (inbox)
+      description: |-
+        Returns the inbox: every conversation where the caller is the buyer or the seller, newest activity first, each with the last-message preview, both participants' usernames and a listing summary.
+
+        Conversations for deleted listings are still returned, with `listingId: null` (the UI shows "Listing no longer available").
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Conversations where the caller is the buyer or the seller, newest activity first. `listingId` is `null` when the listing was deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConversationInboxItem'
+              examples:
+                inbox:
+                  summary: Inbox
+                  value:
+                    success: true
+                    data:
+                    - _id: 665f1c2a9b1e4d0012a3b4d1
+                      buyerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a2
+                        username: ventabuyer
+                      sellerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a1
+                        username: ventaseller
+                      listingId:
+                        _id: 665f1c2a9b1e4d0012a3b4c5
+                        title: Ryzen 5 7600X
+                        status: available
+                      lastMessage: Yes, still available.
+                      lastMessageAt: '2026-11-22T07:20:31.203Z'
+                      createdAt: '2026-11-22T06:55:22.163Z'
+                      updatedAt: '2026-11-22T07:20:31.203Z'
+                deletedListing:
+                  summary: Listing deleted
+                  value:
+                    success: true
+                    data:
+                    - _id: 665f1c2a9b1e4d0012a3b4d1
+                      buyerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a2
+                        username: ventabuyer
+                      sellerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a1
+                        username: ventaseller
+                      listingId: null
+                      lastMessage: Yes, still available.
+                      lastMessageAt: '2026-11-22T07:20:31.203Z'
+                      createdAt: '2026-11-22T06:55:22.163Z'
+                      updatedAt: '2026-11-22T07:20:31.203Z'
+                empty:
+                  summary: Empty inbox
+                  value:
+                    success: true
+                    data: []
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /conversations/{id}:
+    post:
+      tags:
+      - Conversations
+      operationId: startConversation
+      summary: Start (or reopen) a conversation about a listing
+      description: |-
+        Starts a conversation between the caller (the buyer) and the seller of a listing, or returns the caller's existing conversation for that listing. There is one conversation per buyer per listing.
+
+        The `id` in the path is a **listing** id. `POST /conversations/{id}` and `GET /conversations/{id}` share a path template, but the id means a different thing in each.
+
+        ### Rules
+
+        - Messaging your own listing returns `400`.
+        - A listing that is not `available` returns `409`, unless you already have a conversation for it, in which case that conversation is returned with `200` so you can read the history.
+        - A new conversation returns `201`. If two requests race to create it, the second gets the existing conversation instead of an error.
+        - The response has participant and listing ids only. Use `GET /conversations/{id}` for details.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ObjectId'
+        description: The **listing** id (not a conversation id). The seller is taken from the listing, never from the client.
+      responses:
+        '200':
+          description: The caller already had a conversation for this listing, so it is returned (even if the listing is no longer available, so history stays readable).
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/Conversation'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4d1
+                  listingId: 665f1c2a9b1e4d0012a3b4c5
+                  buyerId: 665f1c2a9b1e4d0012a3b4a2
+                  sellerId: 665f1c2a9b1e4d0012a3b4a1
+                  lastMessage: null
+                  lastMessageAt: null
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T06:55:22.163Z'
+        '201':
+          description: A new conversation was started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/Conversation'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4d1
+                  listingId: 665f1c2a9b1e4d0012a3b4c5
+                  buyerId: 665f1c2a9b1e4d0012a3b4a2
+                  sellerId: 665f1c2a9b1e4d0012a3b4a1
+                  lastMessage: null
+                  lastMessageAt: null
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T06:55:22.163Z'
+        '400':
+          description: Malformed id, or the caller owns the listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                ownListing:
+                  summary: Own listing
+                  value:
+                    success: false
+                    message: You can't message your own listing
+                invalidId:
+                  summary: Malformed id
+                  value:
+                    success: false
+                    message: The listingId field format is invalid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Listing not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not found
+        '409':
+          description: The listing is not `available` and the caller has no existing conversation for it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Listing not available
+    get:
+      tags:
+      - Conversations
+      operationId: getConversation
+      summary: Get a conversation
+      description: |-
+        Returns one conversation with both participants' usernames and a listing summary (`title`, `price`, `status`). Participants only.
+
+        A conversation whose listing was deleted is still returned, with `listingId: null`. Anyone who is not a participant gets `404`, so conversation ids do not leak.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ObjectId'
+        description: The **conversation** id.
+      responses:
+        '200':
+          description: The conversation with its listing summary and both participants. `listingId` is `null` if the listing was deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/ConversationDetail'
+              examples:
+                conversation:
+                  summary: Conversation
+                  value:
+                    success: true
+                    data:
+                      _id: 665f1c2a9b1e4d0012a3b4d1
+                      buyerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a2
+                        username: ventabuyer
+                      sellerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a1
+                        username: ventaseller
+                      listingId:
+                        _id: 665f1c2a9b1e4d0012a3b4c5
+                        title: Ryzen 5 7600X
+                        price: 8500
+                        status: available
+                      lastMessage: Yes, still available.
+                      lastMessageAt: '2026-11-22T07:20:31.203Z'
+                      createdAt: '2026-11-22T06:55:22.163Z'
+                      updatedAt: '2026-11-22T07:20:31.203Z'
+                deletedListing:
+                  summary: Listing deleted
+                  value:
+                    success: true
+                    data:
+                      _id: 665f1c2a9b1e4d0012a3b4d1
+                      buyerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a2
+                        username: ventabuyer
+                      sellerId:
+                        _id: 665f1c2a9b1e4d0012a3b4a1
+                        username: ventaseller
+                      listingId: null
+                      lastMessage: Yes, still available.
+                      lastMessageAt: '2026-11-22T07:20:31.203Z'
+                      createdAt: '2026-11-22T06:55:22.163Z'
+                      updatedAt: '2026-11-22T07:20:31.203Z'
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: The conversationId field format is invalid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Conversation missing, or the caller is not a participant (same response so ids do not leak).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Conversation not found
+  /conversations/{conversationId}/messages:
+    get:
+      tags:
+      - Conversations
+      operationId: listMessages
+      summary: Get messages
+      description: |-
+        Returns the message history, oldest first (an empty array if none). Participants only.
+
+        History stays readable when the listing is pending, rejected, sold or deleted. Non-participants get `404`.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ObjectId'
+      responses:
+        '200':
+          description: Message history, oldest first. Still readable when the listing is pending, rejected, sold or deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+              examples:
+                messages:
+                  summary: Messages
+                  value:
+                    success: true
+                    data:
+                    - _id: 665f1c2a9b1e4d0012a3b4e1
+                      conversationId: 665f1c2a9b1e4d0012a3b4d1
+                      senderId: 665f1c2a9b1e4d0012a3b4a2
+                      content: Hello. Is the price still negotiable?
+                      createdAt: '2026-11-22T06:55:22.163Z'
+                      updatedAt: '2026-11-22T06:55:22.163Z'
+                    - _id: 665f1c2a9b1e4d0012a3b4e2
+                      conversationId: 665f1c2a9b1e4d0012a3b4d1
+                      senderId: 665f1c2a9b1e4d0012a3b4a1
+                      content: Yes, still available.
+                      createdAt: '2026-11-22T07:20:31.203Z'
+                      updatedAt: '2026-11-22T07:20:31.203Z'
+                empty:
+                  summary: No messages yet
+                  value:
+                    success: true
+                    data: []
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: The conversationId field format is invalid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Conversation missing, or the caller is not a participant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Conversation not found
+    post:
+      tags:
+      - Conversations
+      operationId: sendMessage
+      summary: Send a message
+      description: |-
+        Sends a message in a conversation. Both the buyer and the seller can send. Participants only.
+
+        Messages are 1 to 1000 characters. Sending is allowed only while the listing is `available`. If the listing is pending, rejected, sold or deleted, the conversation stays readable but sending returns `409`. New messages appear on refresh (there is no real-time delivery).
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ObjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            example:
+              content: Hello. Is the price still negotiable?
+      responses:
+        '201':
+          description: Message sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  data:
+                    $ref: '#/components/schemas/Message'
+              example:
+                success: true
+                data:
+                  _id: 665f1c2a9b1e4d0012a3b4e1
+                  conversationId: 665f1c2a9b1e4d0012a3b4d1
+                  senderId: 665f1c2a9b1e4d0012a3b4a2
+                  content: Hello. Is the price still negotiable?
+                  createdAt: '2026-11-22T06:55:22.163Z'
+                  updatedAt: '2026-11-22T06:55:22.163Z'
+        '400':
+          description: Malformed id, or empty / over-long message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidId:
+                  summary: Malformed id
+                  value:
+                    success: false
+                    message: The conversationId field format is invalid
+                empty:
+                  summary: Empty message
+                  value:
+                    success: false
+                    message: The content field must have at least 1 characters
+                tooLong:
+                  summary: Over 1000 characters
+                  value:
+                    success: false
+                    message: The content field must not be greater than 1000 characters
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Conversation missing, or the caller is not a participant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: Conversation not found
+        '409':
+          description: 'Sending is blocked: the listing is pending, rejected, sold or deleted.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                message: This listing is no longer available for messaging
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ListingId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+      description: The listing id. A malformed id returns `400`.
+  schemas:
+    ObjectId:
+      type: string
+      pattern: ^[0-9a-fA-F]{24}$
+      example: 665f1c2a9b1e4d0012a3b4c5
+      description: A MongoDB ObjectId as a 24-character hex string.
+    Category:
+      type: string
+      enum:
+      - Desktop
+      - Processor
+      - GPU
+      - Motherboard
+      - RAM
+      - Storage
+      - PSU
+      - Cooler
+      - Case
+    ListingStatus:
+      type: string
+      enum:
+      - pending
+      - available
+      - rejected
+      - sold
+      description: Lifecycle status. Only `available` listings are public.
+    Error:
+      type: object
+      required:
+      - success
+      - message
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        message:
+          type: string
+          description: Human-readable error message.
+    PublicUser:
+      type: object
+      required:
+      - _id
+      - username
+      description: The only user identity other users can see. Email is never included.
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        username:
+          type: string
+          example: ventaseller
+    AuthUser:
+      type: object
+      required:
+      - _id
+      - username
+      - email
+      - role
+      description: The caller's own account. The email is returned to that user only.
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        username:
+          type: string
+          example: ventauser
+        email:
+          type: string
+          format: email
+          example: ventauser@example.com
+        role:
+          type: string
+          enum:
+          - user
+          - admin
+          description: A UI hint only. The server reads the role from the database on every request.
+    AuthResult:
+      type: object
+      required:
+      - user
+      - token
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        token:
+          type: string
+          description: 'JWT. Send as `Authorization: Bearer <token>`.'
+    RegisterRequest:
+      type: object
+      required:
+      - username
+      - email
+      - password
+      properties:
+        username:
+          type: string
+          minLength: 4
+          maxLength: 15
+          pattern: ^[a-z0-9_]+$
+          description: Lowercase letters, numbers and underscores. Unique.
+        email:
+          type: string
+          format: email
+          description: Unique. Used to log in, never shown publicly.
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          format: password
+    LoginRequest:
+      type: object
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    ChangePasswordRequest:
+      type: object
+      required:
+      - currentPassword
+      - newPassword
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+          format: password
+          description: Must differ from `currentPassword`.
+    PresignRequest:
+      type: object
+      required:
+      - files
+      properties:
+        files:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            required:
+            - contentType
+            - size
+            properties:
+              contentType:
+                type: string
+                enum:
+                - image/jpeg
+                - image/png
+                - image/webp
+              size:
+                type: integer
+                minimum: 1
+                maximum: 5242880
+                description: File size in bytes. Max 5 MB (5,242,880).
+    PresignedUpload:
+      type: object
+      required:
+      - key
+      - uploadUrl
+      properties:
+        key:
+          type: string
+          description: Server-generated S3 key under `listings/<userId>/`. Store this in the listing.
+        uploadUrl:
+          type: string
+          description: Pre-signed URL for one `PUT`. Expires in 5 minutes.
+    ListingBase:
+      type: object
+      required:
+      - _id
+      - category
+      - title
+      - price
+      - location
+      - images
+      - imageUrls
+      - status
+      - createdAt
+      - updatedAt
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        category:
+          $ref: '#/components/schemas/Category'
+        title:
+          type: string
+          maxLength: 100
+        price:
+          type: number
+          minimum: 1
+          description: Price in PHP.
+        location:
+          type: string
+          maxLength: 100
+        images:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+          description: S3 object keys.
+        imageUrls:
+          type: array
+          items:
+            type: string
+          description: Public URLs built from `images`. Not pre-signed.
+        status:
+          $ref: '#/components/schemas/ListingStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ListingSummary:
+      description: A browse card. Omits `description` and `rejectionReason`; the seller is populated.
+      allOf:
+      - $ref: '#/components/schemas/ListingBase'
+      - type: object
+        required:
+        - userId
+        properties:
+          userId:
+            $ref: '#/components/schemas/PublicUser'
+    ListingDetail:
+      description: A listing with the seller populated (public detail and admin queue).
+      allOf:
+      - $ref: '#/components/schemas/ListingBase'
+      - type: object
+        required:
+        - description
+        - rejectionReason
+        - userId
+        properties:
+          description:
+            type: string
+            minLength: 10
+            maxLength: 4000
+          rejectionReason:
+            type: string
+            nullable: true
+            maxLength: 500
+            description: Set when an admin rejects; cleared when the seller resubmits.
+          userId:
+            $ref: '#/components/schemas/PublicUser'
+    Listing:
+      description: A listing as returned to its owner or after a write. `userId` is the seller id only.
+      allOf:
+      - $ref: '#/components/schemas/ListingBase'
+      - type: object
+        required:
+        - description
+        - rejectionReason
+        - userId
+        properties:
+          description:
+            type: string
+            minLength: 10
+            maxLength: 4000
+          rejectionReason:
+            type: string
+            nullable: true
+            maxLength: 500
+          userId:
+            $ref: '#/components/schemas/ObjectId'
+    ListingCreate:
+      type: object
+      required:
+      - category
+      - title
+      - price
+      - description
+      - location
+      - images
+      description: Fields not listed here (for example `status`, `userId`, `role`) are ignored.
+      properties:
+        category:
+          $ref: '#/components/schemas/Category'
+        title:
+          type: string
+          maxLength: 100
+        price:
+          type: number
+          minimum: 1
+          multipleOf: 0.01
+          description: PHP, at most 2 decimal places.
+        description:
+          type: string
+          minLength: 10
+          maxLength: 4000
+        location:
+          type: string
+          maxLength: 100
+        images:
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+          description: S3 keys from `POST /uploads/presign`, all under your own `listings/<userId>/` prefix.
+    ListingUpdate:
+      type: object
+      minProperties: 1
+      description: Send only the fields to change. `status` and `rejectionReason` are ignored if sent.
+      properties:
+        category:
+          $ref: '#/components/schemas/Category'
+        title:
+          type: string
+          maxLength: 100
+        price:
+          type: number
+          minimum: 1
+          multipleOf: 0.01
+        description:
+          type: string
+          minLength: 10
+          maxLength: 4000
+        location:
+          type: string
+          maxLength: 100
+        images:
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+          description: The FULL list of keys. Photos removed from the list are deleted from S3.
+    ReviewRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - available
+          - rejected
+        rejectionReason:
+          type: string
+          minLength: 5
+          maxLength: 500
+          description: Required when `status` is `rejected`.
+    Pagination:
+      type: object
+      required:
+      - page
+      - limit
+      - total
+      - totalPages
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+    Conversation:
+      type: object
+      description: A conversation with participant and listing ids only.
+      required:
+      - _id
+      - listingId
+      - buyerId
+      - sellerId
+      - lastMessage
+      - lastMessageAt
+      - createdAt
+      - updatedAt
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        listingId:
+          $ref: '#/components/schemas/ObjectId'
+        buyerId:
+          $ref: '#/components/schemas/ObjectId'
+        sellerId:
+          $ref: '#/components/schemas/ObjectId'
+        lastMessage:
+          type: string
+          nullable: true
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ConversationInboxItem:
+      type: object
+      description: Inbox entry. `listingId` is `null` if the listing was deleted ("Listing no longer available").
+      required:
+      - _id
+      - listingId
+      - buyerId
+      - sellerId
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        buyerId:
+          $ref: '#/components/schemas/PublicUser'
+        sellerId:
+          $ref: '#/components/schemas/PublicUser'
+        listingId:
+          type: object
+          nullable: true
+          required:
+          - _id
+          - title
+          - status
+          properties:
+            _id:
+              $ref: '#/components/schemas/ObjectId'
+            title:
+              type: string
+            status:
+              $ref: '#/components/schemas/ListingStatus'
+        lastMessage:
+          type: string
+          nullable: true
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ConversationDetail:
+      type: object
+      description: One conversation. `listingId` is `null` if the listing was deleted.
+      required:
+      - _id
+      - listingId
+      - buyerId
+      - sellerId
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        buyerId:
+          $ref: '#/components/schemas/PublicUser'
+        sellerId:
+          $ref: '#/components/schemas/PublicUser'
+        listingId:
+          type: object
+          nullable: true
+          required:
+          - _id
+          - title
+          - price
+          - status
+          properties:
+            _id:
+              $ref: '#/components/schemas/ObjectId'
+            title:
+              type: string
+            price:
+              type: number
+            status:
+              $ref: '#/components/schemas/ListingStatus'
+        lastMessage:
+          type: string
+          nullable: true
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Message:
+      type: object
+      required:
+      - _id
+      - conversationId
+      - senderId
+      - content
+      - createdAt
+      - updatedAt
+      properties:
+        _id:
+          $ref: '#/components/schemas/ObjectId'
+        conversationId:
+          $ref: '#/components/schemas/ObjectId'
+        senderId:
+          $ref: '#/components/schemas/ObjectId'
+        content:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    SendMessageRequest:
+      type: object
+      required:
+      - content
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 1000
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired or revoked token, or a token issued before the last password change.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missingToken:
+              summary: No token
+              value:
+                success: false
+                message: Not authorized. No token provided.
+            revokedToken:
+              summary: Revoked token (after logout)
+              value:
+                success: false
+                message: This token has been revoked. Please log in again.
+            passwordChanged:
+              summary: Token issued before a password change
+              value:
+                success: false
+                message: Password recently changed. Please log in again.
+    Forbidden:
+      description: The caller is logged in but is not an admin.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            success: false
+            message: Forbidden. You do not have permission to perform this action.
