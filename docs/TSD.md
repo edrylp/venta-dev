@@ -613,7 +613,7 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/admin/listings?status=pending` | Admin | List listings awaiting review (defaults to `pending`). |
+| `GET` | `/admin/listings` | Admin | List listings awaiting review. Only returns listings in `pending` status. |
 | `PATCH` | `/admin/listings/:id/status` | Admin | Approve or reject. Body: `{ "status": "available" }` or `{ "status": "rejected", "rejectionReason": "..." }` |
 
 Admins can only move `pending` listings; any other status returns `409`. `rejectionReason` is required when rejecting (`400` if missing) and is cleared when the seller resubmits the listing.
