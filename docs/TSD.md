@@ -436,7 +436,7 @@ messageSchema.index({ conversationId: 1, createdAt: -1 });
 export default mongoose.models.Message || mongoose.model("Message", messageSchema);
 ```
 
-> **How conversations work:** The inbox is two plain queries on `buyerId` or `sellerId`, sorted by `lastMessageAt`, with the listing populated for its title and status. The conversation stores a denormalized `lastMessage` preview, so the inbox never has to look at the messages collection. The inbox hides empty conversation (see 3.6).
+> **How conversations work:** The inbox is two plain queries on `buyerId` or `sellerId`, sorted by `lastMessageAt`, with the listing populated for its title and status. The conversation stores a denormalized copy of the last message (`lastMessage`, full text, up to 1000 characters) and its time (`lastMessageAt`), so the inbox never has to look at the messages collection. The frontend truncates the text for display. The inbox hides empty conversation (see 3.6).
 >
 > **Sending a message** creates the `Message`, then updates the conversation's `lastMessage` and `lastMessageAt`. These two writes are not in a transaction: if the second one fails, the inbox preview is briefly stale but no message is lost. That trade-off is accepted for the MVP.
 >
@@ -625,14 +625,14 @@ All routes require a logged-in user.
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
 | `POST` | `/conversations/:listingId` | User | Start a conversation about a listing, or return the buyer's existing one. `sellerId` is taken from the listing, never from the client. |
-| `GET` | `/conversations` | User | Inbox: the user's conversations (as buyer or seller), newest activity first. |
+| `GET` | `/conversations` | User | Inbox: the user's conversations (as buyer or seller) that have at least one message, newest activity first. Conversations opened but never used are hidden. Each item includes the listing (`title`, `price`, `status`, or `null` if deleted) and both participants' `username`. |
 | `GET` | `/conversations/:conversationId` | User | One conversation with its listing (`title`, `price`, `status`) and both participants' `username`. Participants only. A deleted listing comes back as `null`. |
 | `GET` | `/conversations/:conversationId/messages` | User | Message history, oldest first. Participants only. |
 | `POST` | `/conversations/:conversationId/messages` | User | Send a message. Body: `{ "content" }`. Participants only. |
 
 **Business rules:**
 
-- Starting a conversation on your own listing returns `400`. Starting one on a listing that is not `available` returns `409`, unless the buyer already has a conversation for it, in which case that conversation is returned (`200`) so they can still read the history. A new conversation returns `201`.
+- Starting a conversation on your own listing returns `400`. Starting one on a listing that is not `available` returns `409`, unless the buyer already has a conversation for it, in which case that conversation is returned (`200`) so they can still read the history. If the listing has been deleted, the request returns `404` even when a conversation exists. The buyer reads the history through `GET /conversations/:conversationId` instead. A new conversation returns `201`.
 - Only the buyer and the seller of a conversation can read or send in it. Anyone else gets `404`, so conversation IDs don't leak.
 - Sending is only allowed while the listing is `available`. If the listing is pending, rejected, sold, or deleted, the conversation stays readable and sending returns `409`.
 - If the listing was deleted, the conversation and its messages stay available. The listing link returns `404` (see 3.4). The link also returns `404` for buyers when the listing is pending, rejected, or sold.
