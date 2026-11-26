@@ -210,7 +210,7 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { versionKey: false } }
 );
 
 userSchema.pre("save", async function () {
@@ -317,7 +317,7 @@ const listingSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true, toJSON: { virtuals: true }, id: false },
+  { timestamps: true, toJSON: { virtuals: true, versionKey: false }, id: false },
 );
 
 // Seller's listings, newest first
@@ -384,7 +384,7 @@ const conversationSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 // One conversation per buyer per listing
@@ -428,7 +428,7 @@ const messageSchema = new mongoose.Schema(
       maxlength: [1000, "Message cannot exceed 1000 characters"],
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 messageSchema.index({ conversationId: 1, createdAt: -1 });
