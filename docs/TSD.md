@@ -549,7 +549,7 @@ export default connectDatabase;
 |--------|----------|--------|-------------|
 | `POST` | `/auth/register` | Public | Create an account (`username`, `email`, `password`). Returns user + JWT. |
 | `POST` | `/auth/login` | Public | Log in with `email` + `password`. Returns user + JWT. |
-| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. newPassword must differ from currentPassword (400). |
+| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns user + a fresh JWT, the same shape as login. newPassword must differ from currentPassword (400). |
 | `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its jti and expiry in RevokedToken. The token stops working immediately, so calling logout again with the same token returns 401. The frontend clears its auth store whether or not the request succeeds. Returns `200` with `{ "success": true, "data": { "message": "Logged out successfully" } }`. |
 
 **Response shape for `POST /auth/register` (`201`) and `POST /auth/login` (`200`)**
@@ -578,12 +578,12 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/listings` | Public | Get **available** listings, filtered, sorted and paginated (see query parameters below). Response: `{ "success": true, "data": [ ...listings ], "pagination": { page, limit, total, totalPages } }`, with `pagination` as a sibling of `data`. List items omit `description` and `rejectionReason` and include `imageUrls`. No matches, or a page past the end, returns `200` with `data: []`. |
+| `GET` | `/listings` | Public | Get **available** listings, filtered, sorted and paginated (see query parameters below). Response: `{ "success": true, "data": [ ...listings ], "pagination": { page, limit, total, totalPages } }`, with `pagination` as a sibling of `data`. List items omit `description` and `rejectionReason` and include `imageUrls`. List items populate userId with username, emails are never exposed: `.populate("userId", "username")`. No matches, or a page past the end, returns `200` with `data: []`. |
 | `GET` | `/listings/my-listings` | User | Get the current user's own listings (all statuses). |
-| `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. |
+| `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. Listing populates userId with username, emails are never exposed: `.populate("userId", "username")` |
 | `POST` | `/listings` | User | Create a listing with 1 to 10 images (S3 keys from the presign step). Status starts as `pending`. |
 | `PATCH` | `/listings/:id` | Owner | Content edit only; status and rejectionReason are not accepted. An empty body returns 400. images is the full list of keys (1 to 10, under the owner’s prefix, otherwise 400). Editing an available or rejected listing sends it back to pending and clears rejectionReason; editing a pending listing keeps it pending; a sold listing returns 409. Photos removed from the list are deleted from S3. |
-| `PATCH` | `/listings/:id/sold` | Owner | Mark the listing as sold. No request body. Only an `available` listing can be marked sold; any other status returns `409`. Returns 200 with `{ "success": false, data: { message: "Listing marked as sold" }`. |
+| `PATCH` | `/listings/:id/sold` | Owner | Mark the listing as sold. No request body. Only an `available` listing can be marked sold; any other status returns `409`. Returns 200 with `{ "success": true, "data": { "message": "Listing marked as sold" }`. |
 | `DELETE` | `/listings/:id` | Owner / Admin | Deletes the listing, then its S3 photos (best-effort: failures are logged and don’t fail the request, so orphaned objects are possible). Conversations and messages are kept. Returns `200` with `{ "success": true, "data": { "message": "Successfully deleted" } }`. |
 
 **Not found or not yours**: edit, mark as sold and delete return 404 for both a missing listing and one the caller can’t modify, so listing ids don’t leak. An admin can delete any listing but can’t edit or mark sold. Listing responses include `imageUrls` (public URLs built from the stored keys).
