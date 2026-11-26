@@ -613,10 +613,10 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/admin/listings` | Admin | List listings awaiting review. Only returns listings in `pending` status. |
+| `GET` | `/admin/listings` | Admin | List listings awaiting review. Only returns listings in `pending` status; there is no `status` parameter. Oldest first (`updatedAt` ascending, `_id` as tiebreaker), so the longest-waiting listing is reviewed first. Unlike the public list, items are full listings, including `description`, `imageUrls` and `rejectionReason`, with the seller as `userId: { _id, username }`. The queue is not paginated. |
 | `PATCH` | `/admin/listings/:id/status` | Admin | Approve or reject. Body: `{ "status": "available" }` or `{ "status": "rejected", "rejectionReason": "..." }` |
 
-Admins can only move `pending` listings; any other status returns `409`. `rejectionReason` is required when rejecting (`400` if missing) and is cleared when the seller resubmits the listing.
+Admins can only move `pending` listings; any other status returns `409`. `rejectionReason` is required when rejecting (`400` if missing) and is cleared when the seller resubmits the listing. The admin review queue sorts by `updatedAt`, not `createdAt`, so a listing that a seller edits and resubmits goes to the back of the queue.
 
 ### 4.5 Conversations & Messages
 
