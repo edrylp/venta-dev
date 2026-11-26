@@ -436,7 +436,7 @@ messageSchema.index({ conversationId: 1, createdAt: -1 });
 export default mongoose.models.Message || mongoose.model("Message", messageSchema);
 ```
 
-> **How conversations work:** The inbox is two plain queries on `buyerId` or `sellerId`, sorted by `lastMessageAt`, with the listing populated for its title and status. The conversation stores a denormalized `lastMessage` preview, so the inbox never has to look at the messages collection.
+> **How conversations work:** The inbox is two plain queries on `buyerId` or `sellerId`, sorted by `lastMessageAt`, with the listing populated for its title and status. The conversation stores a denormalized `lastMessage` preview, so the inbox never has to look at the messages collection. The inbox hides empty conversation (see 3.6).
 >
 > **Sending a message** creates the `Message`, then updates the conversation's `lastMessage` and `lastMessageAt`. These two writes are not in a transaction: if the second one fails, the inbox preview is briefly stale but no message is lost. That trade-off is accepted for the MVP.
 >
@@ -516,7 +516,14 @@ export default connectDatabase;
 
 > **Where `.env` is loaded:** only in `server.js` (local dev), as its first import (`import "dotenv/config"`), so the variables exist before any other module reads them. This file does not load it. On Lambda, variables come from the function's environment configuration and no `.env` file is deployed. Tests and scripts load their own env: set it in the Vitest config, and import `dotenv/config` at the top of the admin seed script.
 
-> **`sanitizeFilter` and `$text`:** With `sanitizeFilter` on, Mongoose throws `$text is not allowed with sanitizeFilter` for keyword search. `GET /listings` wraps the whole operand object: `filter.$text = mongoose.trusted({ $search: q })`. This is safe because `q` is validated as a plain string by VineJS first. `sanitizeFilter` stays enabled globally for every other query.
+> **`sanitizeFilter` and `mongoose.trusted()`:** `sanitizeFilter` is enabled globally and strips `$` operators from query filters, so a user can't inject something like `{ "$gt": "" }`. Two queries need an operator, so each wraps its operand with `mongoose.trusted()`:
+>
+> | Query | Operand | Why it is safe |
+> |-------|---------|----------------|
+> | `GET /listings` keyword search | `filter.$text = mongoose.trusted({ $search: q })` | `q` is validated as a plain string by VineJS first. Without the wrapper, Mongoose throws `$text is not allowed with sanitizeFilter`. |
+> | `GET /conversations` (inbox) | `lastMessageAt: mongoose.trusted({ $ne: null })` | The operand is a constant in the code, with no user input. Without the wrapper, the filter is stripped and the query fails. It hides conversations that have no messages yet. |
+>
+> Rule: `trusted()` is only used on operands the server controls or has already validated, never on `req.body` or `req.query`. Every other query keeps `sanitizeFilter` on.
 
 ---
 
@@ -871,7 +878,7 @@ const images = uploads.map((u) => u.key);
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`) in layers:
   1. **Query parser:** Express 5's default `simple` parser does not build nested objects, so `?q[$gt]=` arrives as a flat key named `q[$gt]`. VineJS drops it as an unknown field and the request behaves like a plain list (`200`). If the parser is ever switched to `extended`, the same request would produce an object and fail layer 2 with a `400`.
   2. **VineJS:** string types reject non-string values, such as objects and the array from `?q=a&q=b` (`400`).
-  3. **`sanitizeFilter`** is enabled globally (see 3.6). The one deliberate exception is the `$text` operand in `GET /listings`, wrapped with `mongoose.trusted()` after validation.
+  3. **`sanitizeFilter`** is enabled globally (see 3.6). The two deliberate exceptions are the `$text` operand in `GET /listings` (after validation) and the constant `$ne: null` in the inbox query. Both are wrapped with `mongoose.trusted()` (see 3.6).
 - Validate `images[]` with `hasValidUserKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
 
