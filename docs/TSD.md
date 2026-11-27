@@ -532,6 +532,8 @@ export default connectDatabase;
 
 **Base URL:** `https://<api-id>.execute-api.<region>.amazonaws.com/api` (local: `http://localhost:<PORT>/api`)
 
+> **API reference:** the routes in this section are also published as an OpenAPI 3.0.3 spec (`docs/openapi.yaml`), rendered with Scalar and hosted on GitHub Pages (`docs/index.html`). This section is the design and the source of truth. The spec is the machine-readable contract for the same routes. If they disagree, the TSD is checked first, and whichever one is wrong gets fixed.
+
 - **Path prefix:** Express mounts every router under `/api` itself (`app.use("/api/auth", authRoutes)`). API Gateway uses the `$default` stage, so no stage name appears in the path and no path rewriting is needed. The same route table works locally, on Lambda, and in Postman.
 
 **Conventions**
@@ -646,7 +648,7 @@ All routes require a logged-in user.
 ```text
 venta/
 ├── client/                 # React (Vite) frontend, deployed to Vercel (Phase 3, not yet created)
-├── docs/                   # PRD, TSD, API docs
+├── docs/                   # PRD, TSD, OpenAPI spec (openapi.yaml), Scalar API reference (index.html)
 └── server/
     ├── src/
     │   ├── app.js          # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
