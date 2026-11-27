@@ -642,13 +642,13 @@ All routes require a logged-in user.
 
 ```text
 venta/
-├── client/                 # React (Vite) frontend, deployed to Vercel
+├── client/                 # React (Vite) frontend, deployed to Vercel (Phase 3, not yet created)
 ├── docs/                   # PRD, TSD, API docs
 └── server/
     ├── src/
     │   ├── app.js          # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
     │   ├── server.js       # Local dev entry: connects DB, calls listen()
-    │   ├── handler.js      # Lambda entrypoint
+    │   ├── handler.js      # Lambda entrypoint (Phase 4, not yet created)
     │   ├── config/
     │   │   ├── database.js # Cached Mongoose connection
     │   │   └── vine.js     # VineJS setup: shared error-messages provider
@@ -658,9 +658,12 @@ venta/
     │   ├── validators/     # VineJS schemas
     │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
     │   └── utils/          # s3.js, generateToken.js
+    ├── scripts/            
+    │   └── seedAdmin.js    # Creates the admin user (run with `npm run seedadmin`)
     ├── tests/              # Vitest + Supertest + mongodb-memory-server
     ├── .env                # Local only (gitignored); Lambda uses function environment variables
     ├── .env.example        # Template listing every variable (no secrets), committed
+    ├── vitest.config.js    # Test config; loads the test env
     └── package.json
 ```
 
