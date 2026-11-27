@@ -2,7 +2,7 @@
 
 > **Venta** is a C2C marketplace for used PCs and PC components.
 
-> **Author:** Edryl Palinis · **Version:** 1.3
+> **Author:** Edryl Palinis · **Version:** 1.4
 
 > **Stack:** React · Tailwind CSS · Zustand · Node.js/Express (`serverless-http`) · VineJS (`@vinejs/vine`) · MongoDB Atlas (Mongoose) · JWT · AWS S3 · AWS Lambda + API Gateway · Vercel
 
@@ -22,6 +22,7 @@
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.4 | 2026-11-27 | Synced with v0.4 code audit: `versionKey: false` in model schemas (3.1 to 3.4); second `mongoose.trusted()` exception for the inbox filter (3.6, 5.4); inbox hides conversations with no messages, populated usernames and `lastMessage` stored as full text (3.4, 4.5); deleted-listing `404` and `409` rules for starting a conversation (4.5); `PATCH /auth/password` and listing response shapes (4.1, 4.2); fixed sold response (4.2); admin queue is pending only, oldest first, full listing fields (4.4); validator rules for `q` and id params (5.4); verified 5 MB S3 enforcement (5.1); project structure (4.6); Phase 0 to 2 checklists ticked and Phase 5 bullets cleaned up (6.2); `docs/` entry updated and API reference note added (4, 4.6). |
 | 1.3 | 2026-11-18 | Synced with `GET /listings` search and sort: exact response shape (`pagination` as a sibling of `data`, stated once in the conventions), `_id` tiebreaker on all sorts, query param rules (`q` 1 to 100 characters, empty-string params return `400`, unknown params ignored), `$text` wrapped with `mongoose.trusted()` under `sanitizeFilter` (3.6), and NoSQL injection layers including the Express 5 query parser behavior (5.4). |
 | 1.2 | 2026-11-18 | Synced with Phase 2: listings API (ownership returns 404, `optionalAuth` on `GET /listings/:id`, `PATCH /listings/:id/sold`, delete behavior and response), auth and middleware (second logout returns 401), S3 (per-key delete, `requestChecksumCalculation`), models, validators and env vars, catch-all 404 handler, `MONGODB_URI` guard in `connectDatabase`, `rejectionReason` default, and mark-sold in the user capabilities and status lifecycle. |
 | 1.1 | 2026-11-12 | Synced with Phase 1: VineJS validation, auth response shape, health routes, `/api` prefix, tests moved to Phase 1, env var clarifications, `protect` vs `errorHandler`, project structure. |
@@ -210,7 +211,7 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { versionKey: false } }
 );
 
 userSchema.pre("save", async function () {
@@ -317,7 +318,7 @@ const listingSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true, toJSON: { virtuals: true }, id: false },
+  { timestamps: true, toJSON: { virtuals: true, versionKey: false }, id: false },
 );
 
 // Seller's listings, newest first
@@ -384,7 +385,7 @@ const conversationSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 // One conversation per buyer per listing
@@ -428,7 +429,7 @@ const messageSchema = new mongoose.Schema(
       maxlength: [1000, "Message cannot exceed 1000 characters"],
     },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { versionKey: false } },
 );
 
 messageSchema.index({ conversationId: 1, createdAt: -1 });
@@ -436,7 +437,7 @@ messageSchema.index({ conversationId: 1, createdAt: -1 });
 export default mongoose.models.Message || mongoose.model("Message", messageSchema);
 ```
 
-> **How conversations work:** The inbox is two plain queries on `buyerId` or `sellerId`, sorted by `lastMessageAt`, with the listing populated for its title and status. The conversation stores a denormalized `lastMessage` preview, so the inbox never has to look at the messages collection.
+> **How conversations work:** The inbox is two plain queries on `buyerId` or `sellerId`, sorted by `lastMessageAt`, with the listing populated for its title and status. The conversation stores a denormalized copy of the last message (`lastMessage`, full text, up to 1000 characters) and its time (`lastMessageAt`), so the inbox never has to look at the messages collection. The frontend truncates the text for display. The inbox hides empty conversation (see 3.6).
 >
 > **Sending a message** creates the `Message`, then updates the conversation's `lastMessage` and `lastMessageAt`. These two writes are not in a transaction: if the second one fails, the inbox preview is briefly stale but no message is lost. That trade-off is accepted for the MVP.
 >
@@ -516,13 +517,22 @@ export default connectDatabase;
 
 > **Where `.env` is loaded:** only in `server.js` (local dev), as its first import (`import "dotenv/config"`), so the variables exist before any other module reads them. This file does not load it. On Lambda, variables come from the function's environment configuration and no `.env` file is deployed. Tests and scripts load their own env: set it in the Vitest config, and import `dotenv/config` at the top of the admin seed script.
 
-> **`sanitizeFilter` and `$text`:** With `sanitizeFilter` on, Mongoose throws `$text is not allowed with sanitizeFilter` for keyword search. `GET /listings` wraps the whole operand object: `filter.$text = mongoose.trusted({ $search: q })`. This is safe because `q` is validated as a plain string by VineJS first. `sanitizeFilter` stays enabled globally for every other query.
+> **`sanitizeFilter` and `mongoose.trusted()`:** `sanitizeFilter` is enabled globally and strips `$` operators from query filters, so a user can't inject something like `{ "$gt": "" }`. Two queries need an operator, so each wraps its operand with `mongoose.trusted()`:
+>
+> | Query | Operand | Why it is safe |
+> |-------|---------|----------------|
+> | `GET /listings` keyword search | `filter.$text = mongoose.trusted({ $search: q })` | `q` is validated as a plain string by VineJS first. Without the wrapper, Mongoose throws `$text is not allowed with sanitizeFilter`. |
+> | `GET /conversations` (inbox) | `lastMessageAt: mongoose.trusted({ $ne: null })` | The operand is a constant in the code, with no user input. Without the wrapper, the filter is stripped and the query fails. It hides conversations that have no messages yet. |
+>
+> Rule: `trusted()` is only used on operands the server controls or has already validated, never on `req.body` or `req.query`. Every other query keeps `sanitizeFilter` on.
 
 ---
 
 ## 4. API Endpoints & Routes (RESTful)
 
 **Base URL:** `https://<api-id>.execute-api.<region>.amazonaws.com/api` (local: `http://localhost:<PORT>/api`)
+
+> **API reference:** the routes in this section are also published as an OpenAPI 3.0.3 spec (`docs/openapi.yaml`), rendered with Scalar and hosted on GitHub Pages (`docs/index.html`). This section is the design and the source of truth. The spec is the machine-readable contract for the same routes. If they disagree, the TSD is checked first, and whichever one is wrong gets fixed.
 
 - **Path prefix:** Express mounts every router under `/api` itself (`app.use("/api/auth", authRoutes)`). API Gateway uses the `$default` stage, so no stage name appears in the path and no path rewriting is needed. The same route table works locally, on Lambda, and in Postman.
 
@@ -542,7 +552,7 @@ export default connectDatabase;
 |--------|----------|--------|-------------|
 | `POST` | `/auth/register` | Public | Create an account (`username`, `email`, `password`). Returns user + JWT. |
 | `POST` | `/auth/login` | Public | Log in with `email` + `password`. Returns user + JWT. |
-| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns a fresh JWT. newPassword must differ from currentPassword (400). |
+| `PATCH` | `/auth/password` | User | Change password. Body: `{ "currentPassword", "newPassword" }`. A wrong `currentPassword` returns `400` (not `401`, so the frontend's 401 handler doesn't log the user out). Sets `passwordChangedAt` and returns user + a fresh JWT, the same shape as login. newPassword must differ from currentPassword (400). |
 | `POST` | `/auth/logout` | User | Log out. Revokes the current token by storing its jti and expiry in RevokedToken. The token stops working immediately, so calling logout again with the same token returns 401. The frontend clears its auth store whether or not the request succeeds. Returns `200` with `{ "success": true, "data": { "message": "Logged out successfully" } }`. |
 
 **Response shape for `POST /auth/register` (`201`) and `POST /auth/login` (`200`)**
@@ -571,12 +581,12 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/listings` | Public | Get **available** listings, filtered, sorted and paginated (see query parameters below). Response: `{ "success": true, "data": [ ...listings ], "pagination": { page, limit, total, totalPages } }`, with `pagination` as a sibling of `data`. List items omit `description` and `rejectionReason` and include `imageUrls`. No matches, or a page past the end, returns `200` with `data: []`. |
+| `GET` | `/listings` | Public | Get **available** listings, filtered, sorted and paginated (see query parameters below). Response: `{ "success": true, "data": [ ...listings ], "pagination": { page, limit, total, totalPages } }`, with `pagination` as a sibling of `data`. List items omit `description` and `rejectionReason` and include `imageUrls`. List items populate userId with username, emails are never exposed: `.populate("userId", "username")`. No matches, or a page past the end, returns `200` with `data: []`. |
 | `GET` | `/listings/my-listings` | User | Get the current user's own listings (all statuses). |
-| `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. |
+| `GET` | `/listings/:id` | Public (optional auth) | Get one listing. Listings that aren’t available are visible only to the owner or an admin; everyone else gets 404. The token is optional: a missing, invalid, expired or revoked token is treated as a guest. Listing populates userId with username, emails are never exposed: `.populate("userId", "username")` |
 | `POST` | `/listings` | User | Create a listing with 1 to 10 images (S3 keys from the presign step). Status starts as `pending`. |
 | `PATCH` | `/listings/:id` | Owner | Content edit only; status and rejectionReason are not accepted. An empty body returns 400. images is the full list of keys (1 to 10, under the owner’s prefix, otherwise 400). Editing an available or rejected listing sends it back to pending and clears rejectionReason; editing a pending listing keeps it pending; a sold listing returns 409. Photos removed from the list are deleted from S3. |
-| `PATCH` | `/listings/:id/sold` | Owner | Mark the listing as sold. No request body. Only an `available` listing can be marked sold; any other status returns `409`. Returns 200 with `{ "success": false, data: { message: "Listing marked as sold" }`. |
+| `PATCH` | `/listings/:id/sold` | Owner | Mark the listing as sold. No request body. Only an `available` listing can be marked sold; any other status returns `409`. Returns 200 with `{ "success": true, "data": { "message": "Listing marked as sold" }`. |
 | `DELETE` | `/listings/:id` | Owner / Admin | Deletes the listing, then its S3 photos (best-effort: failures are logged and don’t fail the request, so orphaned objects are possible). Conversations and messages are kept. Returns `200` with `{ "success": true, "data": { "message": "Successfully deleted" } }`. |
 
 **Not found or not yours**: edit, mark as sold and delete return 404 for both a missing listing and one the caller can’t modify, so listing ids don’t leak. An admin can delete any listing but can’t edit or mark sold. Listing responses include `imageUrls` (public URLs built from the stored keys).
@@ -606,10 +616,10 @@ export default connectDatabase;
 
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
-| `GET` | `/admin/listings?status=pending` | Admin | List listings awaiting review (defaults to `pending`). |
+| `GET` | `/admin/listings` | Admin | List listings awaiting review. Only returns listings in `pending` status; there is no `status` parameter. Oldest first (`updatedAt` ascending, `_id` as tiebreaker), so the longest-waiting listing is reviewed first. Unlike the public list, items are full listings, including `description`, `imageUrls` and `rejectionReason`, with the seller as `userId: { _id, username }`. The queue is not paginated. |
 | `PATCH` | `/admin/listings/:id/status` | Admin | Approve or reject. Body: `{ "status": "available" }` or `{ "status": "rejected", "rejectionReason": "..." }` |
 
-Admins can only move `pending` listings; any other status returns `409`. `rejectionReason` is required when rejecting (`400` if missing) and is cleared when the seller resubmits the listing.
+Admins can only move `pending` listings; any other status returns `409`. `rejectionReason` is required when rejecting (`400` if missing) and is cleared when the seller resubmits the listing. The admin review queue sorts by `updatedAt`, not `createdAt`, so a listing that a seller edits and resubmits goes to the back of the queue.
 
 ### 4.5 Conversations & Messages
 
@@ -618,14 +628,16 @@ All routes require a logged-in user.
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
 | `POST` | `/conversations/:listingId` | User | Start a conversation about a listing, or return the buyer's existing one. `sellerId` is taken from the listing, never from the client. |
-| `GET` | `/conversations` | User | Inbox: the user's conversations (as buyer or seller), newest activity first. |
+| `GET` | `/conversations` | User | Inbox: the user's conversations (as buyer or seller) that have at least one message, newest activity first. Conversations opened but never used are hidden. Each item includes the listing (`title`, `price`, `status`, or `null` if deleted) and both participants' `username`. |
 | `GET` | `/conversations/:conversationId` | User | One conversation with its listing (`title`, `price`, `status`) and both participants' `username`. Participants only. A deleted listing comes back as `null`. |
 | `GET` | `/conversations/:conversationId/messages` | User | Message history, oldest first. Participants only. |
 | `POST` | `/conversations/:conversationId/messages` | User | Send a message. Body: `{ "content" }`. Participants only. |
 
+> `POST /conversations/:listingId` returns `409` (not `404`) for a listing that exists but isn't `available`. This is reachable only by a user who already has the listing id, normally from a listing page they could open while it was live, and ObjectIds are not guessable. The `409` lets the UI say "this listing is no longer available" instead of a generic not-found. This is an accepted trade-off against the id-privacy rule in 4.2.
+
 **Business rules:**
 
-- Starting a conversation on your own listing returns `400`. Starting one on a listing that is not `available` returns `409`, unless the buyer already has a conversation for it, in which case that conversation is returned (`200`) so they can still read the history. A new conversation returns `201`.
+- Starting a conversation on your own listing returns `400`. Starting one on a listing that is not `available` returns `409`, unless the buyer already has a conversation for it, in which case that conversation is returned (`200`) so they can still read the history. If the listing has been deleted, the request returns `404` even when a conversation exists. The buyer reads the history through `GET /conversations/:conversationId` instead. A new conversation returns `201`.
 - Only the buyer and the seller of a conversation can read or send in it. Anyone else gets `404`, so conversation IDs don't leak.
 - Sending is only allowed while the listing is `available`. If the listing is pending, rejected, sold, or deleted, the conversation stays readable and sending returns `409`.
 - If the listing was deleted, the conversation and its messages stay available. The listing link returns `404` (see 3.4). The link also returns `404` for buyers when the listing is pending, rejected, or sold.
@@ -635,25 +647,28 @@ All routes require a logged-in user.
 
 ```text
 venta/
-├── client/                 # React (Vite) frontend, deployed to Vercel
-├── docs/                   # PRD, TSD, API docs
+├── client/                 # React (Vite) frontend, deployed to Vercel (Phase 3, not yet created)
+├── docs/                   # PRD, TSD, OpenAPI spec (openapi.yaml), Scalar API reference (index.html)
 └── server/
     ├── src/
     │   ├── app.js          # Express app: Helmet, CORS, JSON parsing, routes, errorHandler. Exports `app`, never calls listen()
     │   ├── server.js       # Local dev entry: connects DB, calls listen()
-    │   ├── handler.js      # Lambda entrypoint
+    │   ├── handler.js      # Lambda entrypoint (Phase 4, not yet created)
     │   ├── config/
     │   │   ├── database.js # Cached Mongoose connection
     │   │   └── vine.js     # VineJS setup: shared error-messages provider
     │   ├── models/         # User, Listing, Message, Conversation, RevokedToken
-    │   ├── routes/         # authRoutes, listingRoutes, adminRoutes, conversationRoutes, messageRoutes, uploadRoutes
+    │   ├── routes/         # authRoutes, listingRoutes, adminRoutes, conversationRoutes, uploadRoutes; messageRoutes is mounted inside conversationRoutes (`mergeParams: true`)
     │   ├── controllers/    # One file per resource 
     │   ├── validators/     # VineJS schemas
     │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
     │   └── utils/          # s3.js, generateToken.js
+    ├── scripts/            
+    │   └── seedAdmin.js    # Creates the admin user (run with `npm run seedadmin`)
     ├── tests/              # Vitest + Supertest + mongodb-memory-server
     ├── .env                # Local only (gitignored); Lambda uses function environment variables
     ├── .env.example        # Template listing every variable (no secrets), committed
+    ├── vitest.config.js    # Test config; loads the test env
     └── package.json
 ```
 
@@ -797,7 +812,7 @@ export const deleteObjects = async (keys) => {
 
 > **Why one delete per key?** The batch `DeleteObjectsCommand` failed with a `MalformedXML` error on the SDK version in use (`@aws-sdk/client-s3` 3.1168.0), even with a valid key array. A listing has at most 10 photos, so one `DeleteObjectCommand` per key with `Promise.allSettled` costs almost nothing. If any delete fails, `deleteObjects` throws one summary error. The controllers catch and log it, and the request still succeeds because the database is already updated. The accepted trade-off is a possible orphaned object in S3.
 
-> **How the 5 MB limit is enforced:** three layers. The browser checks the size first (quick feedback only). The presign endpoint rejects any declared size over 5 MB. S3 then enforces the declared size, because `content-length` is a signed header, so an upload of a different size fails the signature check. Only the S3 layer can't be bypassed by a modified client. Verify it in Phase 2; if S3 still accepts an oversized file, switch to a presigned POST with a `content-length-range` condition.
+> **How the 5 MB limit is enforced:** three layers. The browser checks the size first (quick feedback only). The presign endpoint rejects any declared size over 5 MB. S3 then enforces the declared size, because `content-length` is a signed header, so an upload of a different size fails the signature check. Only the S3 layer can't be bypassed by a modified client. Verified in Phase 2 against a real bucket: a file uploaded at the signed size succeeds (`200`), a larger file sent to the same URL is rejected by S3 (`403 SignatureDoesNotMatch`), and a presign request for a file over 5 MB is rejected by the API (`400`). The presigned POST fallback was not needed.
 
 **Frontend sketch**
 
@@ -861,17 +876,18 @@ const images = uploads.map((u) => u.key);
 
   | Field | Rule | Why |
   | --- | --- | --- |
-  | `:id` params | Valid ObjectId (`idParamValidator`, shared by all routes with an id) | Malformed ids return `400` instead of a database cast error |
+  | `:id`, `:listingId`, `:conversationId` params | Valid ObjectId (one validator per param name, in `commonValidators.js`) | Malformed ids return `400` instead of a database cast error |
   | `images` | 1 to 10 keys, all distinct, each under the owner's prefix | Stops the same photo being attached twice, and other users' files being attached |
   | `price` | At least 1, at most 2 decimal places | Prices are pesos and centavos, never fractions of a centavo |
-  | `q` | String, max 100 characters | Keeps keyword search bounded |
+  | `q` | String, 1 to 100 characters (an empty string returns `400`) | Keeps keyword search bounded |
   | `rejectionReason` | Required when rejecting, at least 5 characters (model max 500) | Forces a reason the seller can act on |
+  | Message `content` | String, trimmed, 1 to 1000 characters (`sendMessageValidator`) | Whitespace-only messages return `400` |
 
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`) in layers:
   1. **Query parser:** Express 5's default `simple` parser does not build nested objects, so `?q[$gt]=` arrives as a flat key named `q[$gt]`. VineJS drops it as an unknown field and the request behaves like a plain list (`200`). If the parser is ever switched to `extended`, the same request would produce an object and fail layer 2 with a `400`.
   2. **VineJS:** string types reject non-string values, such as objects and the array from `?q=a&q=b` (`400`).
-  3. **`sanitizeFilter`** is enabled globally (see 3.6). The one deliberate exception is the `$text` operand in `GET /listings`, wrapped with `mongoose.trusted()` after validation.
+  3. **`sanitizeFilter`** is enabled globally (see 3.6). The two deliberate exceptions are the `$text` operand in `GET /listings` (after validation) and the constant `$ne: null` in the inbox query. Both are wrapped with `mongoose.trusted()` (see 3.6).
 - Validate `images[]` with `hasValidUserKeys(userId, keys)`: every entry must be a string inside the user's own `listings/<userId>/` prefix, so users can't attach arbitrary or other users' files. Known limitation: this checks the prefix, not that the object exists in S3.
 - Use `helmet` for secure HTTP headers.
 
@@ -937,39 +953,39 @@ app.use(
 
 #### Phase 0 (v0.2) — Setup (Day 1–2)
 
-- [ ] Create GitHub repos (or a monorepo with `/client` and `/server`).
-- [ ] Set up a free MongoDB Atlas cluster and a database user.
-- [ ] Initialize Express app with `helmet`, `cors`, `dotenv`, and an error handler.
-- [ ] Add a `GET /api/health` route to confirm the server runs.
-- [ ] Write a clear `README.md` with the project description and setup steps.
+- [x] Create GitHub repos (or a monorepo with `/client` and `/server`).
+- [x] Set up a free MongoDB Atlas cluster and a database user.
+- [x] Initialize Express app with `helmet`, `cors`, `dotenv`, and an error handler.
+- [x] Add a `GET /api/health` route to confirm the server runs.
+- [x] Write a clear `README.md` with the project description and setup steps.
 
 #### Phase 1 (v0.3) — Database & Authentication
 
-- [ ] Implement Mongoose connection (with caching).
-- [ ] Create the `User` model.
-- [ ] Create the `RevokedToken` model (TTL index on `expiresAt`) and include a `jti` in every token in `generateToken`.
-- [ ] Build `POST /auth/register`, `POST /auth/login`, `PATCH /auth/password`, `POST /auth/logout`.
-- [ ] Add `protect` (verifies the JWT, rejects revoked tokens, loads the user, rejects tokens issued before a password change) and `authorize('admin')` (checks the role) middleware.
-- [ ] Add temporary protected routes: `GET /api/health/protected` (behind `protect`) and `GET /api/health/admin` (behind `protect` and `authorize('admin')`). Both return the authenticated user's `_id` and `role`. Remove both in Phase 2.
-- [ ] Add VineJS request validation (`validators/` + `validate` middleware).
-- [ ] Seed one admin user via a script (it imports `dotenv/config` itself).
-- [ ] Test all endpoints in Postman.
+- [x] Implement Mongoose connection (with caching).
+- [x] Create the `User` model.
+- [x] Create the `RevokedToken` model (TTL index on `expiresAt`) and include a `jti` in every token in `generateToken`.
+- [x] Build `POST /auth/register`, `POST /auth/login`, `PATCH /auth/password`, `POST /auth/logout`.
+- [x] Add `protect` (verifies the JWT, rejects revoked tokens, loads the user, rejects tokens issued before a password change) and `authorize('admin')` (checks the role) middleware.
+- [x] Add temporary protected routes: `GET /api/health/protected` (behind `protect`) and `GET /api/health/admin` (behind `protect` and `authorize('admin')`). Both return the authenticated user's `_id` and `role`. Remove both in Phase 2.
+- [x] Add VineJS request validation (`validators/` + `validate` middleware).
+- [x] Seed one admin user via a script (it imports `dotenv/config` itself).
+- [x] Test all endpoints in Postman.
 
 **Done when:** you can register, log in, call the temporary protected routes with a token, and confirm that after changing the password the old token is rejected, and that after logging out the same token is rejected. A normal user gets `403` on `/health/admin` and an admin gets `200`. The automated tests pass.
 
 #### Phase 2 (v0.4) — Listings CRUD, S3 & Messaging
 
-- [ ] Create the `Listing` model with indexes.
-- [ ] Build listing routes: create, list (filters + pagination), get one, update, delete, and `GET /listings/my-listings`.
-- [ ] Test keyword search (`q`) with `sanitizeFilter` on. If `$text` errors or is stripped, wrap the search term with `mongoose.trusted()`.
-- [ ] Remove the temporary `GET /api/health/protected` and `GET /api/health/admin` routes from Phase 1, now that real routes exercise `protect` and `authorize`.
-- [ ] Enforce ownership checks and the status lifecycle (Section 2.3).
-- [ ] Create an S3 bucket (block most public access; configure CORS and `listings/*` read policy). Give the Lambda role `s3:PutObject` and `s3:DeleteObject` on `listings/*`.
-- [ ] Create `POST /uploads/presign` and test a real upload using Postman.
-- [ ] Verify the 5 MB limit is enforced by S3: presign for a small size, upload a larger file, and expect S3 to reject it (the presign code signs `content-length`). If S3 accepts it anyway, switch to a presigned POST with a `content-length-range` condition.
-- [ ] On listing delete (and when photos are removed in an update), delete the S3 objects with `deleteObjects`. Keep the listing's conversations and messages.
-- [ ] Build admin endpoints (list pending, approve/reject).
-- [ ] Build the `Conversation` and `Message` models and the conversation and message endpoints (Section 4.5).
+- [x] Create the `Listing` model with indexes.
+- [x] Build listing routes: create, list (filters + pagination), get one, update, delete, and `GET /listings/my-listings`.
+- [x] Test keyword search (`q`) with `sanitizeFilter` on. If `$text` errors or is stripped, wrap the search term with `mongoose.trusted()`.
+- [x] Remove the temporary `GET /api/health/protected` and `GET /api/health/admin` routes from Phase 1, now that real routes exercise `protect` and `authorize`.
+- [x] Enforce ownership checks and the status lifecycle (Section 2.3).
+- [x] Create an S3 bucket (block most public access; configure CORS and `listings/*` read policy). Give the Lambda role `s3:PutObject` and `s3:DeleteObject` on `listings/*`.
+- [x] Create `POST /uploads/presign` and test a real upload using Postman.
+- [x] Verify the 5 MB limit is enforced by S3: presign for a small size, upload a larger file, and expect S3 to reject it (the presign code signs `content-length`). If S3 accepts it anyway, switch to a presigned POST with a `content-length-range` condition.
+- [x] On listing delete (and when photos are removed in an update), delete the S3 objects with `deleteObjects`. Keep the listing's conversations and messages.
+- [x] Build admin endpoints (list pending, approve/reject).
+- [x] Build the `Conversation` and `Message` models and the conversation and message endpoints (Section 4.5).
 
 **Done when:** you can create a listing with photos, approve it as admin, see it in the public listing endpoint, then message the seller from a second account and read the conversation.
 
@@ -980,12 +996,12 @@ app.use(
 - [ ] Create a Zustand auth store (`token`, `user`, `login`, `logout`) with the `persist` middleware, and protected routes. `logout` calls `POST /auth/logout`, then clears the store even if that request fails. The Axios interceptor reads the token from the store with `getState()`.
 - [ ] Build pages:
   - Home / Browse (grid, category filter, search, sort, pagination)
-  - Listing Details (image gallery, seller `username`, location, "Message seller" button)
+  - Listing Details (image gallery, seller `username`, location, "Message seller" button that creates or reopens the conversation and opens it)
   - Login / Register
   - Change Password
   - Create / Edit Listing (including location)
   - My Listings (status badges: pending, available, rejected, sold)
-  - Inbox & Conversation view (shows "Listing no longer available" when the listing was deleted)
+  - Inbox & Conversation view (shows "Listing no longer available" when the listing was deleted; the Conversation view has an empty state for a new conversation, which the Inbox does not list until the first message is sent)
   - Admin Review Queue
 - [ ] Implement the upload flow: presign (type and size per file) → PUT to S3 → submit listing with the `key`s. Check file type and the 5 MB limit in the browser first, for quick feedback.
 - [ ] Handle loading, empty, and error states. Make it responsive (mobile-first with Tailwind).
@@ -1004,12 +1020,12 @@ app.use(
 
 #### Phase 5 (v0.7) — Polish & Portfolio Readiness
 
-- [ ] Add a handful of automated tests (auth, listing permissions, conversation permissions).
+- [ ] Review test coverage for the demo journey and run the full suite on every push (optional CI).
+- [ ] Add a conversation race test: call `Conversation.create` twice with `Promise.all` for the same buyer and listing and assert that exactly one rejects with `11000`. (Parallel HTTP requests don't guarantee overlap, so this tests the unique index directly.)
 - [ ] (Optional) GitHub Actions workflow: lint + test on every push.
 - [ ] Add screenshots/GIF demo, architecture diagram, and live link to the README.
 - [ ] Seed realistic demo data (listings across categories) and provide demo credentials.
 - [ ] Write a short "What I learned / trade-offs" section in the README.
-- [ ] Extend the test suite from Phase 1 with listing permissions and conversation permissions
 
 ### 6.3 Deployment Checklist
 
