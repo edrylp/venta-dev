@@ -630,6 +630,8 @@ All routes require a logged-in user.
 | `GET` | `/conversations/:conversationId/messages` | User | Message history, oldest first. Participants only. |
 | `POST` | `/conversations/:conversationId/messages` | User | Send a message. Body: `{ "content" }`. Participants only. |
 
+> `POST /conversations/:listingId` returns `409` (not `404`) for a listing that exists but isn't `available`. This is reachable only by a user who already has the listing id, normally from a listing page they could open while it was live, and ObjectIds are not guessable. The `409` lets the UI say "this listing is no longer available" instead of a generic not-found. This is an accepted trade-off against the id-privacy rule in 4.2.
+
 **Business rules:**
 
 - Starting a conversation on your own listing returns `400`. Starting one on a listing that is not `available` returns `409`, unless the buyer already has a conversation for it, in which case that conversation is returned (`200`) so they can still read the history. If the listing has been deleted, the request returns `404` even when a conversation exists. The buyer reads the history through `GET /conversations/:conversationId` instead. A new conversation returns `201`.
@@ -876,6 +878,7 @@ const images = uploads.map((u) => u.key);
   | `price` | At least 1, at most 2 decimal places | Prices are pesos and centavos, never fractions of a centavo |
   | `q` | String, 1 to 100 characters (an empty string returns `400`) | Keeps keyword search bounded |
   | `rejectionReason` | Required when rejecting, at least 5 characters (model max 500) | Forces a reason the seller can act on |
+  | Message `content` | String, trimmed, 1 to 1000 characters (`sendMessageValidator`) | Whitespace-only messages return `400` |
 
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
 - Guard against **NoSQL injection** (e.g. `{ "email": { "$gt": "" } }`) in layers:
