@@ -97,9 +97,9 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 
 | ID | Story | Priority | Acceptance criteria |
 | --- | --- | --- | --- |
-| A1 | I can see the review queue | Must | Pending listings listed |
+| A1 | I can see the review queue | Must | Pending listings only, oldest first (a resubmitted listing goes to the back), with full details |
 | A2 | I can approve a listing | Must | `pending` to `available` |
-| A3 | I can reject a listing with a reason | Must | Reason required; shown to the seller; cleared when the seller resubmits |
+| A3 | I can reject a listing with a reason | Must | Reason required (5 to 500 characters); shown to the seller; cleared when the seller resubmits |
 | A4 | I can delete any listing | Must | Same behavior as seller delete |
 
 ## 5. Business Rules
