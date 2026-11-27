@@ -49,7 +49,7 @@ Identity: login is by email and password. The `username` is the only identity ot
 
 ### 3.2 Listing fields
 
-Category, title (max 100), price (PHP, at least 1), description (10 to 4000 characters), location (free text, max 100), 1 to 10 photos (5 MB max each; JPEG, PNG, or WebP), status.
+Category, title (max 100), price (PHP, at least 1, up to 2 decimal places), description (10 to 4000 characters), location (free text, max 100), 1 to 10 photos (5 MB max each; JPEG, PNG, or WebP), status.
 
 ### 3.3 Listing statuses
 
@@ -73,7 +73,7 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 | G1 | As a guest, I can browse available listings | Must | Only `available` listings shown, newest first, 20 per page (max 50), paginated; each card shows the listing's first photo as the thumbnail |
 | G2 | I can filter by category | Must | One of the 9 categories narrows the results |
 | G3 | I can view listing details | Must | Photo gallery, title, price in PHP, description, location, seller `username`, category |
-| G4 | I can search by keyword | Should | `q` matches title and description |
+| G4 | I can search by keyword | Should | `q` (1 to 100 characters) matches title and description |
 | G5 | I can sort by price or newest | Should | `price_asc`, `price_desc`, `newest` (default) |
 
 ### 4.2 User
@@ -86,8 +86,8 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 | U4 | I can change my password | Must | Requires current password (wrong one gives 400). New password must differ from the current one and follows the 8 to 72 character rule. Older tokens stop working; I stay logged in with a fresh token |
 | U5 | I can create a listing with photos | Must | 1 to 10 photos, uploaded straight to S3; listing starts `pending` |
 | U6 | I can view my own listings | Must | All statuses with badges; rejected listings show the reason |
-| U7 | I can edit my listing | Must | Follows the status rules in 3.3; removed photos are deleted from S3; photos must stay between 1 and 10 |
-| U8 | I can delete my listing | Must | Listing and its photos are removed; conversations and messages are kept |
+| U7 | I can edit my listing | Must | Follows the status rules in 3.3; removed photos are deleted from S3 (best-effort); photos must stay between 1 and 10 |
+| U8 | I can delete my listing | Must | Listing and its photos are deleted from S3 (best-effort); conversations and messages are kept |
 | U9 | I can mark my listing sold | Must | Only from `available`; any other status is rejected |
 | U10 | As a logged-in user, I can message a seller from a listing | Must | Starts or reopens my single conversation for that listing. Cannot message myself |
 | U11 | I can see my inbox | Must | Conversations as buyer or seller, newest activity first, with last-message preview |
@@ -138,9 +138,10 @@ This is a portfolio project, so success means a demo and a story, not user numbe
 | --- | --- |
 | Payments, `dealMethod`, shipping or meetup flow | Out of scope; handled in messages |
 | User profile pages, "sold via seller profile" | Cut from MVP |
-| Price-range filter, `condition` field | Cut from MVP |
+| Price-range filter | Cut from MVP |
 | Real-time chat, unread indicators | Deferred |
 | Reviews and ratings, reporting tools | Deferred |
 | Email notifications, password reset by email | Deferred |
 | Per-category spec filters, favorites | Deferred |
+| Idempotent logout | Deferred (TSD appendix) |
 | CloudFront, refresh tokens or `httpOnly` cookies, Atlas private networking | Deferred (TSD appendix) |
