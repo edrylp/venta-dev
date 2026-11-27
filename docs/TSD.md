@@ -947,39 +947,39 @@ app.use(
 
 #### Phase 0 (v0.2) — Setup (Day 1–2)
 
-- [ ] Create GitHub repos (or a monorepo with `/client` and `/server`).
-- [ ] Set up a free MongoDB Atlas cluster and a database user.
-- [ ] Initialize Express app with `helmet`, `cors`, `dotenv`, and an error handler.
-- [ ] Add a `GET /api/health` route to confirm the server runs.
-- [ ] Write a clear `README.md` with the project description and setup steps.
+- [x] Create GitHub repos (or a monorepo with `/client` and `/server`).
+- [x] Set up a free MongoDB Atlas cluster and a database user.
+- [x] Initialize Express app with `helmet`, `cors`, `dotenv`, and an error handler.
+- [x] Add a `GET /api/health` route to confirm the server runs.
+- [x] Write a clear `README.md` with the project description and setup steps.
 
 #### Phase 1 (v0.3) — Database & Authentication
 
-- [ ] Implement Mongoose connection (with caching).
-- [ ] Create the `User` model.
-- [ ] Create the `RevokedToken` model (TTL index on `expiresAt`) and include a `jti` in every token in `generateToken`.
-- [ ] Build `POST /auth/register`, `POST /auth/login`, `PATCH /auth/password`, `POST /auth/logout`.
-- [ ] Add `protect` (verifies the JWT, rejects revoked tokens, loads the user, rejects tokens issued before a password change) and `authorize('admin')` (checks the role) middleware.
-- [ ] Add temporary protected routes: `GET /api/health/protected` (behind `protect`) and `GET /api/health/admin` (behind `protect` and `authorize('admin')`). Both return the authenticated user's `_id` and `role`. Remove both in Phase 2.
-- [ ] Add VineJS request validation (`validators/` + `validate` middleware).
-- [ ] Seed one admin user via a script (it imports `dotenv/config` itself).
-- [ ] Test all endpoints in Postman.
+- [x] Implement Mongoose connection (with caching).
+- [x] Create the `User` model.
+- [x] Create the `RevokedToken` model (TTL index on `expiresAt`) and include a `jti` in every token in `generateToken`.
+- [x] Build `POST /auth/register`, `POST /auth/login`, `PATCH /auth/password`, `POST /auth/logout`.
+- [x] Add `protect` (verifies the JWT, rejects revoked tokens, loads the user, rejects tokens issued before a password change) and `authorize('admin')` (checks the role) middleware.
+- [x] Add temporary protected routes: `GET /api/health/protected` (behind `protect`) and `GET /api/health/admin` (behind `protect` and `authorize('admin')`). Both return the authenticated user's `_id` and `role`. Remove both in Phase 2.
+- [x] Add VineJS request validation (`validators/` + `validate` middleware).
+- [x] Seed one admin user via a script (it imports `dotenv/config` itself).
+- [x] Test all endpoints in Postman.
 
 **Done when:** you can register, log in, call the temporary protected routes with a token, and confirm that after changing the password the old token is rejected, and that after logging out the same token is rejected. A normal user gets `403` on `/health/admin` and an admin gets `200`. The automated tests pass.
 
 #### Phase 2 (v0.4) — Listings CRUD, S3 & Messaging
 
-- [ ] Create the `Listing` model with indexes.
-- [ ] Build listing routes: create, list (filters + pagination), get one, update, delete, and `GET /listings/my-listings`.
-- [ ] Test keyword search (`q`) with `sanitizeFilter` on. If `$text` errors or is stripped, wrap the search term with `mongoose.trusted()`.
-- [ ] Remove the temporary `GET /api/health/protected` and `GET /api/health/admin` routes from Phase 1, now that real routes exercise `protect` and `authorize`.
-- [ ] Enforce ownership checks and the status lifecycle (Section 2.3).
-- [ ] Create an S3 bucket (block most public access; configure CORS and `listings/*` read policy). Give the Lambda role `s3:PutObject` and `s3:DeleteObject` on `listings/*`.
-- [ ] Create `POST /uploads/presign` and test a real upload using Postman.
-- [ ] Verify the 5 MB limit is enforced by S3: presign for a small size, upload a larger file, and expect S3 to reject it (the presign code signs `content-length`). If S3 accepts it anyway, switch to a presigned POST with a `content-length-range` condition.
-- [ ] On listing delete (and when photos are removed in an update), delete the S3 objects with `deleteObjects`. Keep the listing's conversations and messages.
-- [ ] Build admin endpoints (list pending, approve/reject).
-- [ ] Build the `Conversation` and `Message` models and the conversation and message endpoints (Section 4.5).
+- [x] Create the `Listing` model with indexes.
+- [x] Build listing routes: create, list (filters + pagination), get one, update, delete, and `GET /listings/my-listings`.
+- [x] Test keyword search (`q`) with `sanitizeFilter` on. If `$text` errors or is stripped, wrap the search term with `mongoose.trusted()`.
+- [x] Remove the temporary `GET /api/health/protected` and `GET /api/health/admin` routes from Phase 1, now that real routes exercise `protect` and `authorize`.
+- [x] Enforce ownership checks and the status lifecycle (Section 2.3).
+- [x] Create an S3 bucket (block most public access; configure CORS and `listings/*` read policy). Give the Lambda role `s3:PutObject` and `s3:DeleteObject` on `listings/*`.
+- [x] Create `POST /uploads/presign` and test a real upload using Postman.
+- [x] Verify the 5 MB limit is enforced by S3: presign for a small size, upload a larger file, and expect S3 to reject it (the presign code signs `content-length`). If S3 accepts it anyway, switch to a presigned POST with a `content-length-range` condition.
+- [x] On listing delete (and when photos are removed in an update), delete the S3 objects with `deleteObjects`. Keep the listing's conversations and messages.
+- [x] Build admin endpoints (list pending, approve/reject).
+- [x] Build the `Conversation` and `Message` models and the conversation and message endpoints (Section 4.5).
 
 **Done when:** you can create a listing with photos, approve it as admin, see it in the public listing endpoint, then message the seller from a second account and read the conversation.
 
@@ -1014,12 +1014,11 @@ app.use(
 
 #### Phase 5 (v0.7) — Polish & Portfolio Readiness
 
-- [ ] Add a handful of automated tests (auth, listing permissions, conversation permissions).
+- [ ] Review test coverage for the demo journey and run the full suite on every push (optional CI).
 - [ ] (Optional) GitHub Actions workflow: lint + test on every push.
 - [ ] Add screenshots/GIF demo, architecture diagram, and live link to the README.
 - [ ] Seed realistic demo data (listings across categories) and provide demo credentials.
 - [ ] Write a short "What I learned / trade-offs" section in the README.
-- [ ] Extend the test suite from Phase 1 with listing permissions and conversation permissions
 
 ### 6.3 Deployment Checklist
 
