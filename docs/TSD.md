@@ -655,7 +655,7 @@ venta/
     │   │   ├── database.js # Cached Mongoose connection
     │   │   └── vine.js     # VineJS setup: shared error-messages provider
     │   ├── models/         # User, Listing, Message, Conversation, RevokedToken
-    │   ├── routes/         # authRoutes, listingRoutes, adminRoutes, conversationRoutes, messageRoutes, uploadRoutes
+    │   ├── routes/         # authRoutes, listingRoutes, adminRoutes, conversationRoutes, uploadRoutes; messageRoutes is mounted inside conversationRoutes (`mergeParams: true`)
     │   ├── controllers/    # One file per resource 
     │   ├── validators/     # VineJS schemas
     │   ├── middleware/     # protect.js, authorize.js, validate.js, errorHandler.js
@@ -993,12 +993,12 @@ app.use(
 - [ ] Create a Zustand auth store (`token`, `user`, `login`, `logout`) with the `persist` middleware, and protected routes. `logout` calls `POST /auth/logout`, then clears the store even if that request fails. The Axios interceptor reads the token from the store with `getState()`.
 - [ ] Build pages:
   - Home / Browse (grid, category filter, search, sort, pagination)
-  - Listing Details (image gallery, seller `username`, location, "Message seller" button)
+  - Listing Details (image gallery, seller `username`, location, "Message seller" button that creates or reopens the conversation and opens it)
   - Login / Register
   - Change Password
   - Create / Edit Listing (including location)
   - My Listings (status badges: pending, available, rejected, sold)
-  - Inbox & Conversation view (shows "Listing no longer available" when the listing was deleted)
+  - Inbox & Conversation view (shows "Listing no longer available" when the listing was deleted; the Conversation view has an empty state for a new conversation, which the Inbox does not list until the first message is sent)
   - Admin Review Queue
 - [ ] Implement the upload flow: presign (type and size per file) → PUT to S3 → submit listing with the `key`s. Check file type and the 5 MB limit in the browser first, for quick feedback.
 - [ ] Handle loading, empty, and error states. Make it responsive (mobile-first with Tailwind).
@@ -1018,6 +1018,7 @@ app.use(
 #### Phase 5 (v0.7) — Polish & Portfolio Readiness
 
 - [ ] Review test coverage for the demo journey and run the full suite on every push (optional CI).
+- [ ] Add a conversation race test: call `Conversation.create` twice with `Promise.all` for the same buyer and listing and assert that exactly one rejects with `11000`. (Parallel HTTP requests don't guarantee overlap, so this tests the unique index directly.)
 - [ ] (Optional) GitHub Actions workflow: lint + test on every push.
 - [ ] Add screenshots/GIF demo, architecture diagram, and live link to the README.
 - [ ] Seed realistic demo data (listings across categories) and provide demo credentials.
