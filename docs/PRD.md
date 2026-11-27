@@ -1,6 +1,6 @@
 # Venta — Product Requirements Document (PRD)
 
-**Author:** Edryl Palinis · **Version:** 1.0 (Final for MVP build) · **Status:** Aligned with TSD v1.0 · **Docs target:** Oct 30, 2026
+**Author:** Edryl Palinis • **Version:** 1.1 • **Status:** Aligned with TSD v1.4 
 
 > Venta is a C2C marketplace for used PC components in the Philippines. It is a solo portfolio project. The goal is a realistic, solo-scaled SDLC that can be explained in interviews, not a business launch.
 
