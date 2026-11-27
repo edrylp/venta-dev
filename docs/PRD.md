@@ -1,6 +1,6 @@
 # Venta — Product Requirements Document (PRD)
 
-**Author:** Edryl Palinis · **Version:** 1.0 (Final for MVP build) · **Status:** Aligned with TSD v1.0 · **Docs target:** Oct 30, 2026
+**Author:** Edryl Palinis • **Version:** 1.1 • **Status:** Aligned with TSD v1.4 
 
 > Venta is a C2C marketplace for used PC components in the Philippines. It is a solo portfolio project. The goal is a realistic, solo-scaled SDLC that can be explained in interviews, not a business launch.
 
@@ -27,8 +27,8 @@ Venta is a focused marketplace where anyone can sell and buy used computer hardw
 - **No marketing or cold-start solution.** No user acquisition, growth plan or liquidity strategy. The demo runs on seeded data.
 - No payments, escrow, shipping or delivery. Deals happen off-platform.
 - No real-time chat, reviews or ratings, or email notifications.
-- No seller profiles, profile editing, favorites or reporting tools. (Changing your own password is in scope, see U9.)
-- No password reset by email, email verification or account deletion.
+- No seller profiles, profile editing, favorites or reporting tools. (Changing your own password is in scope, see U4.)
+- No password reset by email.
 - No native mobile app. The web app must work on mobile browsers.
 
 ## 2. Users
@@ -49,7 +49,7 @@ Identity: login is by email and password. The `username` is the only identity ot
 
 ### 3.2 Listing fields
 
-Category, title (max 100), price (PHP, at least 1), description (10 to 4000 characters), location (free text, max 100), 1 to 10 photos (5 MB max each; JPEG, PNG, or WebP), status.
+Category, title (max 100), price (PHP, at least 1, up to 2 decimal places), description (10 to 4000 characters), location (free text, max 100), 1 to 10 photos (5 MB max each; JPEG, PNG, or WebP), status.
 
 ### 3.3 Listing statuses
 
@@ -73,33 +73,33 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 | G1 | As a guest, I can browse available listings | Must | Only `available` listings shown, newest first, 20 per page (max 50), paginated; each card shows the listing's first photo as the thumbnail |
 | G2 | I can filter by category | Must | One of the 9 categories narrows the results |
 | G3 | I can view listing details | Must | Photo gallery, title, price in PHP, description, location, seller `username`, category |
-| G4 | I can search by keyword | Should | `q` matches title and description |
+| G4 | I can search by keyword | Should | `q` (1 to 100 characters) matches title and description |
 | G5 | I can sort by price or newest | Should | `price_asc`, `price_desc`, `newest` (default) |
 
 ### 4.2 User
 
 | ID | Story | Priority | Acceptance criteria |
 | --- | --- | --- | --- |
-| U1 | I can register | Must | Username (4 to 15 chars; lowercase letters, numbers, underscores), unique email, password of 8+ characters. Role is always `user`. Duplicate username or email gives a clear error |
+| U1 | I can register | Must | Username (4 to 15 chars; lowercase letters, numbers, underscores; uppercase input is lowercased), unique email, password of 8 to 72 characters. Role is always `user`. Duplicate username or email gives a clear error |
 | U2 | I can log in | Must | Email and password. Same generic error for unknown email and wrong password |
-| U3 | I can log out | Must | Token is revoked server-side. Logging out twice is safe |
-| U4 | I can change my password | Must | Requires current password (wrong one gives 400). Older tokens stop working; I stay logged in with a fresh token |
+| U3 | I can log out | Must | Token is revoked server-side and stops working immediately. Reusing it, including a second logout, returns 401; the app clears the session either way |
+| U4 | I can change my password | Must | Requires current password (wrong one gives 400). New password must differ from the current one and follows the 8 to 72 character rule. Older tokens stop working; I stay logged in with a fresh token |
 | U5 | I can create a listing with photos | Must | 1 to 10 photos, uploaded straight to S3; listing starts `pending` |
 | U6 | I can view my own listings | Must | All statuses with badges; rejected listings show the reason |
-| U7 | I can edit my listing | Must | Follows the status rules in 3.3; removed photos are deleted from S3; photos must stay between 1 and 10 |
-| U8 | I can delete my listing | Must | Listing and its photos are removed; conversations and messages are kept |
+| U7 | I can edit my listing | Must | Follows the status rules in 3.3; removed photos are deleted from S3 (best-effort); photos must stay between 1 and 10 |
+| U8 | I can delete my listing | Must | Listing and its photos are deleted from S3 (best-effort); conversations and messages are kept |
 | U9 | I can mark my listing sold | Must | Only from `available`; any other status is rejected |
 | U10 | As a logged-in user, I can message a seller from a listing | Must | Starts or reopens my single conversation for that listing. Cannot message myself |
-| U11 | I can see my inbox | Must | Conversations as buyer or seller, newest activity first, with last-message preview |
-| U12 | I can read and send messages in a conversation | Must | Participants only; messages up to 1000 characters; new messages appear on page refresh (no polling or real-time) |
+| U11 | I can see my inbox | Must | Conversations as buyer or seller that have at least one message, newest activity first, with last-message preview |
+| U12 | I can read and send messages in a conversation | Must | Participants only; messages 1 to 1000 characters; blank messages rejected; new messages appear on page refresh (no polling or real-time) |
 
 ### 4.3 Admin
 
 | ID | Story | Priority | Acceptance criteria |
 | --- | --- | --- | --- |
-| A1 | I can see the review queue | Must | Pending listings listed |
+| A1 | I can see the review queue | Must | Pending listings only, oldest first (a resubmitted listing goes to the back), with full details |
 | A2 | I can approve a listing | Must | `pending` to `available` |
-| A3 | I can reject a listing with a reason | Must | Reason required; shown to the seller; cleared when the seller resubmits |
+| A3 | I can reject a listing with a reason | Must | Reason required (5 to 500 characters); shown to the seller; cleared when the seller resubmits |
 | A4 | I can delete any listing | Must | Same behavior as seller delete |
 
 ## 5. Business Rules
@@ -107,10 +107,11 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 - Admins can only move `pending` listings. Any other status returns a conflict.
 - A listing that is not `available` is visible only to its owner and admins. For everyone else its link returns 404.
 - **Messaging gate:** sending is allowed only while the listing is `available`. If it is pending, rejected, sold, or deleted, the conversation stays readable but sending is blocked.
-- Starting a conversation on your own listing is an error. Starting one on a non-available listing is an error, unless you already have a conversation for it, in which case it is returned so you can read the history.
+- Starting a conversation on your own listing is an error. Starting one on a non-available listing is an error, unless you already have a conversation for it, in which case it is returned so you can read the history. If the listing was deleted, starting returns 404; the history stays readable from your inbox.
 - One conversation per buyer per listing.
 - Deleting a listing never deletes its conversations. The UI shows "Listing no longer available".
 - Users never set their own `role` or `status`.
+- Edit, mark-sold and delete on someone else's listing, and any conversation you're not part of, return 404 so ids don't leak. Admin delete is allowed.
 
 ## 6. Non-Functional Requirements
 
@@ -138,9 +139,10 @@ This is a portfolio project, so success means a demo and a story, not user numbe
 | --- | --- |
 | Payments, `dealMethod`, shipping or meetup flow | Out of scope; handled in messages |
 | User profile pages, "sold via seller profile" | Cut from MVP |
-| Price-range filter, `condition` field | Cut from MVP |
+| Price-range filter | Cut from MVP |
 | Real-time chat, unread indicators | Deferred |
 | Reviews and ratings, reporting tools | Deferred |
 | Email notifications, password reset by email | Deferred |
 | Per-category spec filters, favorites | Deferred |
+| Idempotent logout | Deferred (TSD appendix) |
 | CloudFront, refresh tokens or `httpOnly` cookies, Atlas private networking | Deferred (TSD appendix) |
