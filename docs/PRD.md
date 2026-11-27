@@ -90,8 +90,8 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 | U8 | I can delete my listing | Must | Listing and its photos are deleted from S3 (best-effort); conversations and messages are kept |
 | U9 | I can mark my listing sold | Must | Only from `available`; any other status is rejected |
 | U10 | As a logged-in user, I can message a seller from a listing | Must | Starts or reopens my single conversation for that listing. Cannot message myself |
-| U11 | I can see my inbox | Must | Conversations as buyer or seller, newest activity first, with last-message preview |
-| U12 | I can read and send messages in a conversation | Must | Participants only; messages up to 1000 characters; new messages appear on page refresh (no polling or real-time) |
+| U11 | I can see my inbox | Must | Conversations as buyer or seller that have at least one message, newest activity first, with last-message preview |
+| U12 | I can read and send messages in a conversation | Must | Participants only; messages 1 to 1000 characters; blank messages rejected; new messages appear on page refresh (no polling or real-time) |
 
 ### 4.3 Admin
 
@@ -107,10 +107,11 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 - Admins can only move `pending` listings. Any other status returns a conflict.
 - A listing that is not `available` is visible only to its owner and admins. For everyone else its link returns 404.
 - **Messaging gate:** sending is allowed only while the listing is `available`. If it is pending, rejected, sold, or deleted, the conversation stays readable but sending is blocked.
-- Starting a conversation on your own listing is an error. Starting one on a non-available listing is an error, unless you already have a conversation for it, in which case it is returned so you can read the history.
+- Starting a conversation on your own listing is an error. Starting one on a non-available listing is an error, unless you already have a conversation for it, in which case it is returned so you can read the history. If the listing was deleted, starting returns 404; the history stays readable from your inbox.
 - One conversation per buyer per listing.
 - Deleting a listing never deletes its conversations. The UI shows "Listing no longer available".
 - Users never set their own `role` or `status`.
+- Edit, mark-sold and delete on someone else's listing, and any conversation you're not part of, return 404 so ids don't leak. Admin delete is allowed.
 
 ## 6. Non-Functional Requirements
 
