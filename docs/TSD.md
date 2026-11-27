@@ -868,10 +868,10 @@ const images = uploads.map((u) => u.key);
 
   | Field | Rule | Why |
   | --- | --- | --- |
-  | `:id` params | Valid ObjectId (`idParamValidator`, shared by all routes with an id) | Malformed ids return `400` instead of a database cast error |
+  | `:id`, `:listingId`, `:conversationId` params | Valid ObjectId (one validator per param name, in `commonValidators.js`) | Malformed ids return `400` instead of a database cast error |
   | `images` | 1 to 10 keys, all distinct, each under the owner's prefix | Stops the same photo being attached twice, and other users' files being attached |
   | `price` | At least 1, at most 2 decimal places | Prices are pesos and centavos, never fractions of a centavo |
-  | `q` | String, max 100 characters | Keeps keyword search bounded |
+  | `q` | String, 1 to 100 characters (an empty string returns `400`) | Keeps keyword search bounded |
   | `rejectionReason` | Required when rejecting, at least 5 characters (model max 500) | Forces a reason the seller can act on |
 
 - Whitelist fields when creating/updating documents. Never pass `req.body` straight into `Model.create()` or `update()`; this prevents "mass assignment" attacks like a user setting their own `role` or `status`.
