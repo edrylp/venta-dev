@@ -27,8 +27,8 @@ Venta is a focused marketplace where anyone can sell and buy used computer hardw
 - **No marketing or cold-start solution.** No user acquisition, growth plan or liquidity strategy. The demo runs on seeded data.
 - No payments, escrow, shipping or delivery. Deals happen off-platform.
 - No real-time chat, reviews or ratings, or email notifications.
-- No seller profiles, profile editing, favorites or reporting tools. (Changing your own password is in scope, see U9.)
-- No password reset by email, email verification or account deletion.
+- No seller profiles, profile editing, favorites or reporting tools. (Changing your own password is in scope, see U4.)
+- No password reset by email.
 - No native mobile app. The web app must work on mobile browsers.
 
 ## 2. Users
