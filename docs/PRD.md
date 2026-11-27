@@ -80,10 +80,10 @@ Priority uses MoSCoW. **Must** items are required for the demo journey: sign up,
 
 | ID | Story | Priority | Acceptance criteria |
 | --- | --- | --- | --- |
-| U1 | I can register | Must | Username (4 to 15 chars; lowercase letters, numbers, underscores), unique email, password of 8+ characters. Role is always `user`. Duplicate username or email gives a clear error |
+| U1 | I can register | Must | Username (4 to 15 chars; lowercase letters, numbers, underscores; uppercase input is lowercased), unique email, password of 8 to 72 characters. Role is always `user`. Duplicate username or email gives a clear error |
 | U2 | I can log in | Must | Email and password. Same generic error for unknown email and wrong password |
-| U3 | I can log out | Must | Token is revoked server-side. Logging out twice is safe |
-| U4 | I can change my password | Must | Requires current password (wrong one gives 400). Older tokens stop working; I stay logged in with a fresh token |
+| U3 | I can log out | Must | Token is revoked server-side and stops working immediately. Reusing it, including a second logout, returns 401; the app clears the session either way |
+| U4 | I can change my password | Must | Requires current password (wrong one gives 400). New password must differ from the current one and follows the 8 to 72 character rule. Older tokens stop working; I stay logged in with a fresh token |
 | U5 | I can create a listing with photos | Must | 1 to 10 photos, uploaded straight to S3; listing starts `pending` |
 | U6 | I can view my own listings | Must | All statuses with badges; rejected listings show the reason |
 | U7 | I can edit my listing | Must | Follows the status rules in 3.3; removed photos are deleted from S3; photos must stay between 1 and 10 |
