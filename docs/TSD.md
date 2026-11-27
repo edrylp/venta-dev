@@ -804,7 +804,7 @@ export const deleteObjects = async (keys) => {
 
 > **Why one delete per key?** The batch `DeleteObjectsCommand` failed with a `MalformedXML` error on the SDK version in use (`@aws-sdk/client-s3` 3.1168.0), even with a valid key array. A listing has at most 10 photos, so one `DeleteObjectCommand` per key with `Promise.allSettled` costs almost nothing. If any delete fails, `deleteObjects` throws one summary error. The controllers catch and log it, and the request still succeeds because the database is already updated. The accepted trade-off is a possible orphaned object in S3.
 
-> **How the 5 MB limit is enforced:** three layers. The browser checks the size first (quick feedback only). The presign endpoint rejects any declared size over 5 MB. S3 then enforces the declared size, because `content-length` is a signed header, so an upload of a different size fails the signature check. Only the S3 layer can't be bypassed by a modified client. Verify it in Phase 2; if S3 still accepts an oversized file, switch to a presigned POST with a `content-length-range` condition.
+> **How the 5 MB limit is enforced:** three layers. The browser checks the size first (quick feedback only). The presign endpoint rejects any declared size over 5 MB. S3 then enforces the declared size, because `content-length` is a signed header, so an upload of a different size fails the signature check. Only the S3 layer can't be bypassed by a modified client. Verified in Phase 2 against a real bucket: a file uploaded at the signed size succeeds (`200`), a larger file sent to the same URL is rejected by S3 (`403 SignatureDoesNotMatch`), and a presign request for a file over 5 MB is rejected by the API (`400`). The presigned POST fallback was not needed.
 
 **Frontend sketch**
 
